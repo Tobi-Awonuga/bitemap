@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
+
+# Vite
+.vite/
+
+# Drizzle generated migrations/output
+drizzle/
+
+# Coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker / local database volume folders if ever used
+postgres-data/
+
+# Misc
+tmp/
+temp/
