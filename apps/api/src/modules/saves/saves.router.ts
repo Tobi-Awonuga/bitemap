@@ -3,6 +3,7 @@ import { eq, and } from 'drizzle-orm'
 import { db } from '../../db'
 import { saves } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
+import { saveSchema } from '@bitemap/shared'
 
 export const savesRouter = Router()
 
@@ -19,11 +20,12 @@ savesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
 
 // POST /api/saves — { placeId }
 savesRouter.post('/', requireAuth, async (req: AuthRequest, res) => {
-  const { placeId } = req.body
-  if (!placeId) {
-    res.status(400).json({ error: 'placeId is required' })
+  const parsed = saveSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten().fieldErrors })
     return
   }
+  const { placeId } = parsed.data
 
   const existing = await db.query.saves.findFirst({
     where: and(eq(saves.userId, req.user!.id), eq(saves.placeId, placeId)),
@@ -33,12 +35,16 @@ savesRouter.post('/', requireAuth, async (req: AuthRequest, res) => {
     return
   }
 
-  const [save] = await db
-    .insert(saves)
-    .values({ userId: req.user!.id, placeId })
-    .returning()
+  try {
+    const [save] = await db
+      .insert(saves)
+      .values({ userId: req.user!.id, placeId })
+      .returning()
 
-  res.status(201).json(save)
+    res.status(201).json(save)
+  } catch {
+    res.status(409).json({ error: 'Already saved' })
+  }
 })
 
 // DELETE /api/saves/:placeId — unsave by place ID

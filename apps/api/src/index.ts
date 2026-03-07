@@ -19,6 +19,20 @@ import * as schema from './db/schema'
 const app = express()
 const PORT = Number(process.env.PORT ?? 4000)
 const SHOULD_RUN_MIGRATIONS = process.env.RUN_MIGRATIONS !== 'false'
+const JWT_SECRET = process.env.JWT_SECRET
+const DATABASE_URL = process.env.DATABASE_URL
+
+function assertRuntimeConfig(): void {
+  if (!DATABASE_URL) {
+    throw new Error('DATABASE_URL is required')
+  }
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is required')
+  }
+  if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change_me_in_production') {
+    throw new Error('JWT_SECRET must be changed in production')
+  }
+}
 
 app.use(cors())
 app.use(express.json())
@@ -32,6 +46,15 @@ app.use('/api/saves', savesRouter)
 app.use('/api/visits', visitsRouter)
 app.use('/api/tags', tagsRouter)
 app.use('/api/admin', adminRouter)
+
+app.use('/api/*', (_req, res) => {
+  res.status(404).json({ error: 'Route not found' })
+})
+
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled API error:', err)
+  res.status(500).json({ error: 'Internal server error' })
+})
 
 async function runMigrations(): Promise<void> {
   if (!SHOULD_RUN_MIGRATIONS) {
@@ -50,6 +73,7 @@ async function runMigrations(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   try {
+    assertRuntimeConfig()
     await runMigrations()
   } catch (err) {
     console.error('Failed to run database migrations:', err)

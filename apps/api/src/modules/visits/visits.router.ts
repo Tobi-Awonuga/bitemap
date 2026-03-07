@@ -3,6 +3,7 @@ import { eq, and } from 'drizzle-orm'
 import { db } from '../../db'
 import { visits } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
+import { visitSchema } from '@bitemap/shared'
 
 export const visitsRouter = Router()
 
@@ -19,22 +20,34 @@ visitsRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
 
 // POST /api/visits — { placeId, visitedAt? }
 visitsRouter.post('/', requireAuth, async (req: AuthRequest, res) => {
-  const { placeId, visitedAt } = req.body
-  if (!placeId) {
-    res.status(400).json({ error: 'placeId is required' })
+  const parsed = visitSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten().fieldErrors })
     return
   }
+  const { placeId, visitedAt } = parsed.data
 
-  const [visit] = await db
-    .insert(visits)
-    .values({
-      userId: req.user!.id,
-      placeId,
-      visitedAt: visitedAt ? new Date(visitedAt) : new Date(),
+  try {
+    const [visit] = await db
+      .insert(visits)
+      .values({
+        userId: req.user!.id,
+        placeId,
+        visitedAt: visitedAt ? new Date(visitedAt) : new Date(),
+      })
+      .returning()
+
+    res.status(201).json(visit)
+  } catch {
+    const existing = await db.query.visits.findFirst({
+      where: and(eq(visits.userId, req.user!.id), eq(visits.placeId, placeId)),
     })
-    .returning()
-
-  res.status(201).json(visit)
+    if (!existing) {
+      res.status(500).json({ error: 'Could not create visit' })
+      return
+    }
+    res.status(200).json(existing)
+  }
 })
 
 // DELETE /api/visits/:id

@@ -29,6 +29,8 @@ Thumbs.db
 
 # Drizzle generated migrations/output
 drizzle/
+!apps/api/drizzle/
+!apps/api/drizzle/**
 
 # Coverage
 coverage/

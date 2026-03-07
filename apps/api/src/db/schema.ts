@@ -1,4 +1,13 @@
-import { pgTable, uuid, text, timestamp, doublePrecision, integer } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  uuid,
+  text,
+  timestamp,
+  doublePrecision,
+  integer,
+  uniqueIndex,
+  index,
+} from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 
 // ─── Tables ──────────────────────────────────────────────────────────────────
@@ -25,7 +34,10 @@ export const places = pgTable('places', {
   priceLevel: integer('price_level'),
   imageUrl: text('image_url'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-})
+}, (table) => ({
+  latIdx: index('places_latitude_idx').on(table.latitude),
+  lngIdx: index('places_longitude_idx').on(table.longitude),
+}))
 
 export const reviews = pgTable('reviews', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -35,21 +47,33 @@ export const reviews = pgTable('reviews', {
   rating: doublePrecision('rating').notNull(),
   body: text('body'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-})
+}, (table) => ({
+  userPlaceUnique: uniqueIndex('reviews_user_place_unique').on(table.userId, table.placeId),
+  placeIdx: index('reviews_place_id_idx').on(table.placeId),
+  userIdx: index('reviews_user_id_idx').on(table.userId),
+}))
 
 export const saves = pgTable('saves', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   placeId: uuid('place_id').notNull().references(() => places.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-})
+}, (table) => ({
+  userPlaceUnique: uniqueIndex('saves_user_place_unique').on(table.userId, table.placeId),
+  userIdx: index('saves_user_id_idx').on(table.userId),
+  placeIdx: index('saves_place_id_idx').on(table.placeId),
+}))
 
 export const visits = pgTable('visits', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   placeId: uuid('place_id').notNull().references(() => places.id, { onDelete: 'cascade' }),
   visitedAt: timestamp('visited_at').defaultNow().notNull(),
-})
+}, (table) => ({
+  userPlaceUnique: uniqueIndex('visits_user_place_unique').on(table.userId, table.placeId),
+  userIdx: index('visits_user_id_idx').on(table.userId),
+  placeIdx: index('visits_place_id_idx').on(table.placeId),
+}))
 
 export const tags = pgTable('tags', {
   id: uuid('id').defaultRandom().primaryKey(),

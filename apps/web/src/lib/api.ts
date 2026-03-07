@@ -26,7 +26,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (res.status === 204) return undefined as T
 
-  const body = await res.json().catch(() => ({ error: 'Unexpected response' }))
+  const contentType = res.headers.get('content-type') ?? ''
+  let body: { error?: string } & Record<string, unknown>
+  if (contentType.includes('application/json')) {
+    body = await res.json().catch(() => ({ error: 'Invalid JSON response' }))
+  } else {
+    const text = await res.text().catch(() => '')
+    body = { error: text || `HTTP ${res.status}` }
+  }
 
   if (!res.ok) {
     throw new Error(body.error ?? `HTTP ${res.status}`)
