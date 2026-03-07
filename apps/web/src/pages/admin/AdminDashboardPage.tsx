@@ -2,22 +2,7 @@ import { useState, useEffect } from 'react'
 import { Users, UtensilsCrossed, MessageSquare, Bookmark, CheckCircle, Star, Loader2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-
-type AdminStats = {
-  totalUsers: number
-  totalPlaces: number
-  totalReviews: number
-  totalSaves: number
-  totalVisits: number
-  recentReviews: Array<{
-    id: string
-    rating: number
-    body?: string
-    createdAt: string
-    user: { id: string; displayName: string }
-    place: { id: string; name: string }
-  }>
-}
+import type { AdminInsights, AdminStats } from '@bitemap/shared'
 
 function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: React.ElementType; color: string }) {
   return (
@@ -33,18 +18,23 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
+  const [insights, setInsights] = useState<AdminInsights | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    api
-      .get<AdminStats>('/api/admin/stats')
-      .then((data) => {
-        setStats(data)
+    Promise.all([
+      api.get<AdminStats>('/api/admin/stats'),
+      api.get<AdminInsights>('/api/admin/insights'),
+    ])
+      .then(([statsData, insightsData]) => {
+        setStats(statsData)
+        setInsights(insightsData)
         setError(null)
       })
       .catch((err) => {
         setStats(null)
+        setInsights(null)
         setError(err instanceof Error ? err.message : 'Failed to load dashboard data')
       })
       .finally(() => setLoading(false))
@@ -91,6 +81,57 @@ export default function AdminDashboardPage() {
             <p className="text-white/70 text-xs mt-1">{desc}</p>
           </Link>
         ))}
+      </div>
+
+      {/* Insights */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-700">
+            <h2 className="text-sm font-semibold text-white">Top Saved Places</h2>
+          </div>
+          <div className="divide-y divide-slate-700">
+            {(insights?.topSavedPlaces ?? []).length === 0 ? (
+              <p className="px-6 py-6 text-sm text-slate-400">No save activity yet.</p>
+            ) : (
+              insights!.topSavedPlaces.map((place) => (
+                <div key={place.id} className="px-6 py-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link to={`/places/${place.id}`} className="text-sm font-medium text-white hover:text-orange-300">
+                      {place.name}
+                    </Link>
+                    {place.cuisine && <p className="text-xs text-slate-400 mt-1">{place.cuisine}</p>}
+                  </div>
+                  <span className="text-xs font-semibold text-orange-300 bg-orange-500/10 px-2 py-1 rounded-md">
+                    {place.saveCount} saves
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-700">
+            <h2 className="text-sm font-semibold text-white">Cuisine Trends</h2>
+          </div>
+          <div className="divide-y divide-slate-700">
+            {(insights?.topCuisines ?? []).length === 0 ? (
+              <p className="px-6 py-6 text-sm text-slate-400">No cuisine trends yet.</p>
+            ) : (
+              insights!.topCuisines.map((row) => (
+                <div key={row.cuisine} className="px-6 py-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white">{row.cuisine}</p>
+                    <p className="text-xs text-slate-400 mt-1">{row.placeCount} places</p>
+                  </div>
+                  <span className="text-xs font-semibold text-emerald-300 bg-emerald-500/10 px-2 py-1 rounded-md">
+                    {row.saveCount} saves
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Recent reviews */}

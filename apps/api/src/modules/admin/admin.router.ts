@@ -43,6 +43,55 @@ adminRouter.get('/stats', async (_req, res) => {
   })
 })
 
+// GET /api/admin/insights — ranked operational insights
+adminRouter.get('/insights', async (_req, res) => {
+  const savesCountExpr = sql<number>`COUNT(DISTINCT ${saves.id})`
+  const placesCountExpr = sql<number>`COUNT(DISTINCT ${places.id})`
+
+  const [topSavedPlaces, cuisineRows] = await Promise.all([
+    db
+      .select({
+        id: places.id,
+        name: places.name,
+        cuisine: places.cuisine,
+        saveCount: savesCountExpr.as('save_count'),
+      })
+      .from(places)
+      .leftJoin(saves, eq(saves.placeId, places.id))
+      .groupBy(places.id)
+      .orderBy(desc(savesCountExpr), desc(places.createdAt))
+      .limit(5),
+    db
+      .select({
+        cuisine: places.cuisine,
+        placeCount: placesCountExpr.as('place_count'),
+        saveCount: savesCountExpr.as('save_count'),
+      })
+      .from(places)
+      .leftJoin(saves, eq(saves.placeId, places.id))
+      .where(sql`${places.cuisine} IS NOT NULL`)
+      .groupBy(places.cuisine)
+      .orderBy(desc(savesCountExpr), desc(placesCountExpr))
+      .limit(6),
+  ])
+
+  res.json({
+    topSavedPlaces: topSavedPlaces.map((place) => ({
+      id: place.id,
+      name: place.name,
+      cuisine: place.cuisine,
+      saveCount: Number(place.saveCount),
+    })),
+    topCuisines: cuisineRows
+      .filter((row) => row.cuisine)
+      .map((row) => ({
+        cuisine: row.cuisine as string,
+        placeCount: Number(row.placeCount),
+        saveCount: Number(row.saveCount),
+      })),
+  })
+})
+
 // GET /api/admin/users — all users
 adminRouter.get('/users', async (_req, res) => {
   const allUsers = await db

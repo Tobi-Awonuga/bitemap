@@ -93,3 +93,17 @@ export interface AdminStats {
     place: { id: string; name: string }
   }>
 }
+
+export interface AdminInsights {
+  topSavedPlaces: Array<{
+    id: string
+    name: string
+    cuisine?: string | null
+    saveCount: number
+  }>
+  topCuisines: Array<{
+    cuisine: string
+    placeCount: number
+    saveCount: number
+  }>
+}
