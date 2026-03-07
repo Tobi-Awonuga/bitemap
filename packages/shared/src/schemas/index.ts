@@ -1,19 +1,30 @@
 import { z } from 'zod'
 
+const passwordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  .regex(/[A-Z]/, 'Password must include at least one uppercase letter')
+  .regex(/[a-z]/, 'Password must include at least one lowercase letter')
+  .regex(/[0-9]/, 'Password must include at least one number')
+
 export const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
-  password: z
-    .string()
-    .min(8, 'Password must be at least 8 characters')
-    .regex(/[A-Z]/, 'Password must include at least one uppercase letter')
-    .regex(/[a-z]/, 'Password must include at least one lowercase letter')
-    .regex(/[0-9]/, 'Password must include at least one number'),
+  password: passwordSchema,
   displayName: z.string().trim().min(1),
 })
 
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
+})
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+})
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(32),
+  password: passwordSchema,
 })
 
 export const placeSchema = z.object({
@@ -50,6 +61,8 @@ export const visitSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>
 export type PlaceInput = z.infer<typeof placeSchema>
 export type ReviewInput = z.infer<typeof reviewSchema>
 export type ReviewUpdateInput = z.infer<typeof reviewUpdateSchema>

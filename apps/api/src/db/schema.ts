@@ -85,6 +85,18 @@ export const placeTags = pgTable('place_tags', {
   tagId: uuid('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' }),
 })
 
+export const passwordResets = pgTable('password_resets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at').notNull(),
+  usedAt: timestamp('used_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index('password_resets_user_id_idx').on(table.userId),
+  expiresIdx: index('password_resets_expires_at_idx').on(table.expiresAt),
+}))
+
 export const follows = pgTable('follows', {
   id: uuid('id').defaultRandom().primaryKey(),
   followerId: uuid('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -104,6 +116,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   reviews: many(reviews),
   followers: many(follows, { relationName: 'following' }),
   following: many(follows, { relationName: 'follower' }),
+  passwordResets: many(passwordResets),
 }))
 
 export const placesRelations = relations(places, ({ many }) => ({
@@ -150,4 +163,8 @@ export const followsRelations = relations(follows, ({ one }) => ({
     references: [users.id],
     relationName: 'following',
   }),
+}))
+
+export const passwordResetsRelations = relations(passwordResets, ({ one }) => ({
+  user: one(users, { fields: [passwordResets.userId], references: [users.id] }),
 }))
