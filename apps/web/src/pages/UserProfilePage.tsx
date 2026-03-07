@@ -112,7 +112,7 @@ export default function UserProfilePage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      <Link to="/" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-orange-600">
+      <Link to="/discover" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-orange-600">
         <ArrowLeft className="w-4 h-4" />
         Back
       </Link>

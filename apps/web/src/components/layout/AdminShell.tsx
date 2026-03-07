@@ -48,7 +48,7 @@ export default function AdminShell() {
         {/* Back to app */}
         <div className="px-3 py-4 border-t border-slate-800">
           <Link
-            to="/"
+            to="/discover"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -65,7 +65,7 @@ export default function AdminShell() {
           </div>
           <span className="font-bold text-white text-sm">Admin</span>
         </div>
-        <Link to="/" className="text-slate-400 text-xs hover:text-white">← App</Link>
+        <Link to="/discover" className="text-slate-400 text-xs hover:text-white">← App</Link>
       </div>
 
       {/* Main content */}

@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useGeolocation } from '../../hooks/useGeolocation'
 
 const navLinks = [
-  { to: '/', label: 'Discover', end: true },
+  { to: '/discover', label: 'Discover', end: true },
   { to: '/map', label: 'Map' },
   { to: '/saved', label: 'Saved' },
   { to: '/visited', label: 'Visited' },
@@ -39,7 +39,7 @@ export default function AppShell() {
       <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 shrink-0">
+          <Link to="/discover" className="flex items-center gap-2 shrink-0">
             <div className="w-8 h-8 bg-orange-500 rounded-xl flex items-center justify-center shadow-sm">
               <Map className="w-4 h-4 text-white" />
             </div>
@@ -105,7 +105,7 @@ export default function AppShell() {
         {/* Mobile bottom nav */}
         <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-100 flex items-center justify-around px-2 py-2">
           {[
-            { to: '/', icon: Map, label: 'Discover', end: true },
+            { to: '/discover', icon: Map, label: 'Discover', end: true },
             { to: '/map', icon: Map, label: 'Map', end: false },
             { to: '/saved', icon: Bookmark, label: 'Saved', end: false },
             { to: '/visited', icon: CheckCircle, label: 'Visited', end: false },

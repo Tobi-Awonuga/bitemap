@@ -18,7 +18,7 @@ export default function LoginPage() {
     setIsLoading(true)
     try {
       await login(email, password)
-      navigate('/')
+      navigate('/discover')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed')
     } finally {

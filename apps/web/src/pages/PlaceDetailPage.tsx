@@ -168,7 +168,7 @@ export default function PlaceDetailPage() {
       <div className="flex flex-col items-center justify-center py-32 text-center px-4">
         <AlertCircle className="w-10 h-10 text-red-400 mb-3" />
         <p className="text-slate-700 font-medium mb-4">{error ?? 'Place not found'}</p>
-        <Link to="/" className="text-orange-500 hover:text-orange-600 font-medium text-sm">
+        <Link to="/discover" className="text-orange-500 hover:text-orange-600 font-medium text-sm">
           ← Back to Discover
         </Link>
       </div>
@@ -182,7 +182,7 @@ export default function PlaceDetailPage() {
       navigate(-1)
       return
     }
-    navigate('/')
+    navigate('/discover')
   }
 
   return (

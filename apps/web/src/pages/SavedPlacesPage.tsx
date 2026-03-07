@@ -73,7 +73,7 @@ export default function SavedPlacesPage() {
             Tap the bookmark icon on any place to save it here for later.
           </p>
           <Link
-            to="/"
+            to="/discover"
             className="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors"
           >
             Explore places

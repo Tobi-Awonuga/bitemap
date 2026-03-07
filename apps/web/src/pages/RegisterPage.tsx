@@ -19,7 +19,7 @@ export default function RegisterPage() {
     setIsLoading(true)
     try {
       await register(displayName, email, password)
-      navigate('/')
+      navigate('/discover')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed')
     } finally {

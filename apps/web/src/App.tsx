@@ -30,7 +30,8 @@ export default function App() {
           {/* Protected user routes */}
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
-              <Route path="/" element={<HomePage />} />
+              <Route path="/" element={<Navigate to="/discover" replace />} />
+              <Route path="/discover" element={<HomePage />} />
               <Route path="/map" element={<MapPage />} />
               <Route path="/places/:id" element={<PlaceDetailPage />} />
               <Route path="/saved" element={<SavedPlacesPage />} />
@@ -50,7 +51,7 @@ export default function App() {
             </Route>
           </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/discover" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
