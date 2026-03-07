@@ -14,7 +14,7 @@ savesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
     orderBy: (saves, { desc }) => [desc(saves.createdAt)],
   })
 
-  res.json({ data: userSaves })
+  res.json(userSaves)
 })
 
 // POST /api/saves — { placeId }
@@ -38,7 +38,7 @@ savesRouter.post('/', requireAuth, async (req: AuthRequest, res) => {
     .values({ userId: req.user!.id, placeId })
     .returning()
 
-  res.status(201).json({ data: save })
+  res.status(201).json(save)
 })
 
 // DELETE /api/saves/:placeId — unsave by place ID

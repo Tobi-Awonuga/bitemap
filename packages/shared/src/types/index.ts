@@ -3,17 +3,36 @@ export interface User {
   email: string
   displayName: string
   avatarUrl?: string
+  role: 'user' | 'admin'
   createdAt: string
 }
 
 export interface Place {
   id: string
   name: string
+  cuisine?: string
+  description?: string
   address: string
   latitude: number
   longitude: number
+  priceLevel?: number
+  imageUrl?: string
   googlePlaceId?: string
   createdAt: string
+}
+
+export interface PlaceWithStats extends Place {
+  avgRating: number
+  reviewCount: number
+  isSaved?: boolean
+  isVisited?: boolean
+  visitId?: string | null
+}
+
+export interface ReviewUser {
+  id: string
+  displayName: string
+  avatarUrl?: string | null
 }
 
 export interface Review {
@@ -24,6 +43,10 @@ export interface Review {
   rating: number
   body?: string
   createdAt: string
+}
+
+export interface ReviewWithUser extends Review {
+  user: ReviewUser
 }
 
 export interface Save {
@@ -42,7 +65,7 @@ export interface Visit {
 
 export interface AuthResponse {
   token: string
-  user: Pick<User, 'id' | 'email' | 'displayName' | 'avatarUrl' | 'createdAt'>
+  user: Pick<User, 'id' | 'email' | 'displayName' | 'avatarUrl' | 'role' | 'createdAt'>
 }
 
 export interface ApiResponse<T> {
@@ -53,4 +76,20 @@ export interface ApiResponse<T> {
 export interface ApiError {
   error: string
   status: number
+}
+
+export interface AdminStats {
+  totalUsers: number
+  totalPlaces: number
+  totalReviews: number
+  totalSaves: number
+  totalVisits: number
+  recentReviews: Array<{
+    id: string
+    rating: number
+    body?: string
+    createdAt: string
+    user: { id: string; displayName: string }
+    place: { id: string; name: string }
+  }>
 }

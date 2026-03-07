@@ -15,6 +15,7 @@ usersRouter.get('/me', requireAuth, async (req: AuthRequest, res) => {
       email: true,
       displayName: true,
       avatarUrl: true,
+      role: true,
       createdAt: true,
     },
   })
@@ -43,6 +44,7 @@ usersRouter.patch('/me', requireAuth, async (req: AuthRequest, res) => {
       email: users.email,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
+      role: users.role,
       createdAt: users.createdAt,
     })
 

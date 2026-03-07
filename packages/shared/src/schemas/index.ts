@@ -13,9 +13,13 @@ export const loginSchema = z.object({
 
 export const placeSchema = z.object({
   name: z.string().min(1),
+  cuisine: z.string().optional(),
+  description: z.string().optional(),
   address: z.string().min(1),
   latitude: z.number(),
   longitude: z.number(),
+  priceLevel: z.number().int().min(1).max(4).optional(),
+  imageUrl: z.string().url().optional(),
   googlePlaceId: z.string().optional(),
 })
 

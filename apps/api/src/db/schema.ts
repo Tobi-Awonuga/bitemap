@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, doublePrecision } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, doublePrecision, integer } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 
 // ─── Tables ──────────────────────────────────────────────────────────────────
@@ -9,16 +9,21 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   displayName: text('display_name').notNull(),
   avatarUrl: text('avatar_url'),
+  role: text('role', { enum: ['user', 'admin'] }).notNull().default('user'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
 export const places = pgTable('places', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
+  cuisine: text('cuisine'),
+  description: text('description'),
   address: text('address').notNull(),
   latitude: doublePrecision('latitude').notNull(),
   longitude: doublePrecision('longitude').notNull(),
   googlePlaceId: text('google_place_id').unique(),
+  priceLevel: integer('price_level'),
+  imageUrl: text('image_url'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 

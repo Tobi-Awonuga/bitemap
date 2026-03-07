@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import { api, setToken, clearToken } from '../lib/api'
 import type { User, AuthResponse, ApiResponse } from '@bitemap/shared'
 
-type AuthUser = Pick<User, 'id' | 'email' | 'displayName' | 'avatarUrl' | 'createdAt'>
+type AuthUser = Pick<User, 'id' | 'email' | 'displayName' | 'avatarUrl' | 'role' | 'createdAt'>
 
 type AuthContextValue = {
   user: AuthUser | null

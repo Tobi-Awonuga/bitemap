@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { eq } from 'drizzle-orm'
+import { eq, count } from 'drizzle-orm'
 import { db } from '../../db'
 import { users } from '../../db/schema'
 import { registerSchema, loginSchema } from '@bitemap/shared'
@@ -24,19 +24,24 @@ authRouter.post('/register', async (req, res) => {
     return
   }
 
+  // First user ever registered becomes admin
+  const [{ value: userCount }] = await db.select({ value: count() }).from(users)
+  const role = userCount === 0 ? 'admin' : 'user'
+
   const passwordHash = await bcrypt.hash(password, 12)
   const [user] = await db
     .insert(users)
-    .values({ email, passwordHash, displayName })
+    .values({ email, passwordHash, displayName, role })
     .returning({
       id: users.id,
       email: users.email,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
+      role: users.role,
       createdAt: users.createdAt,
     })
 
-  const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET!, {
+  const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET!, {
     expiresIn: '7d',
   })
 
@@ -65,7 +70,7 @@ authRouter.post('/login', async (req, res) => {
     return
   }
 
-  const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET!, {
+  const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET!, {
     expiresIn: '7d',
   })
 
@@ -76,6 +81,7 @@ authRouter.post('/login', async (req, res) => {
       email: user.email,
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
+      role: user.role,
       createdAt: user.createdAt,
     },
   })

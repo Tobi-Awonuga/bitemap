@@ -14,7 +14,7 @@ visitsRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
     orderBy: (visits, { desc }) => [desc(visits.visitedAt)],
   })
 
-  res.json({ data: userVisits })
+  res.json(userVisits)
 })
 
 // POST /api/visits — { placeId, visitedAt? }
@@ -34,7 +34,7 @@ visitsRouter.post('/', requireAuth, async (req: AuthRequest, res) => {
     })
     .returning()
 
-  res.status(201).json({ data: visit })
+  res.status(201).json(visit)
 })
 
 // DELETE /api/visits/:id
