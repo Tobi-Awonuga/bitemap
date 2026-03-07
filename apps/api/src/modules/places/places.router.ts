@@ -1,11 +1,104 @@
 import { Router } from 'express'
-import { eq, and, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../../db'
 import { places, reviews, saves, visits } from '../../db/schema'
-import { requireAuth, requireAdmin, AuthRequest } from '../../middleware/auth.middleware'
+import { requireAuth, requireAdmin, type AuthRequest } from '../../middleware/auth.middleware'
 import { placeSchema } from '@bitemap/shared'
 
 export const placesRouter = Router()
+
+type ListQuery = {
+  q?: string
+  lat?: number
+  lng?: number
+  radiusKm: number
+  limit: number
+  offset: number
+}
+
+type PlaceListRow = {
+  id: string
+  name: string
+  cuisine: string | null
+  description: string | null
+  address: string
+  latitude: number
+  longitude: number
+  priceLevel: number | null
+  imageUrl: string | null
+  googlePlaceId: string | null
+  createdAt: Date
+  avgRating: number
+  reviewCount: number
+  isSaved?: boolean
+  isVisited?: boolean
+  visitId?: string | null
+}
+
+type NearbyCacheEntry = {
+  expiresAt: number
+  data: PlaceListRow[]
+}
+
+type NearbyRateLimitEntry = {
+  count: number
+  resetAt: number
+}
+
+type GooglePlace = {
+  id: string
+  displayName?: { text?: string }
+  formattedAddress?: string
+  location?: { latitude?: number; longitude?: number }
+  rating?: number
+  types?: string[]
+}
+
+const nearbyCache = new Map<string, NearbyCacheEntry>()
+const nearbyRateLimit = new Map<string, NearbyRateLimitEntry>()
+const PLACES_PROVIDER = (process.env.PLACES_PROVIDER ?? 'local').toLowerCase()
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? ''
+const PLACES_CACHE_TTL_MS = Number(process.env.PLACES_CACHE_TTL_MS ?? 120000)
+const PLACES_RATE_LIMIT_MAX = Number(process.env.PLACES_RATE_LIMIT_MAX ?? 60)
+const PLACES_RATE_LIMIT_WINDOW_MS = 60 * 1000
+
+function nowMs(): number {
+  return Date.now()
+}
+
+function getClientIp(req: AuthRequest): string {
+  return req.ip || 'unknown'
+}
+
+function allowNearbyRequest(ip: string): boolean {
+  const now = nowMs()
+  const current = nearbyRateLimit.get(ip)
+  if (!current || current.resetAt <= now) {
+    nearbyRateLimit.set(ip, { count: 1, resetAt: now + PLACES_RATE_LIMIT_WINDOW_MS })
+    return true
+  }
+  if (current.count >= PLACES_RATE_LIMIT_MAX) return false
+  current.count += 1
+  nearbyRateLimit.set(ip, current)
+  return true
+}
+
+function parseListQuery(query: Record<string, string | undefined>): ListQuery {
+  const parsedLimit = Number.parseInt(query.limit ?? '50', 10)
+  const parsedOffset = Number.parseInt(query.offset ?? '0', 10)
+  const parsedRadius = Number.parseFloat(query.radius ?? '10')
+  const parsedLat = query.lat !== undefined ? Number.parseFloat(query.lat) : undefined
+  const parsedLng = query.lng !== undefined ? Number.parseFloat(query.lng) : undefined
+
+  return {
+    q: query.q?.trim() || undefined,
+    lat: Number.isFinite(parsedLat) ? parsedLat : undefined,
+    lng: Number.isFinite(parsedLng) ? parsedLng : undefined,
+    radiusKm: Number.isFinite(parsedRadius) ? Math.max(parsedRadius, 0.1) : 10,
+    limit: Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 50,
+    offset: Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0,
+  }
+}
 
 // Haversine distance in km
 function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -18,14 +111,19 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-// GET /api/places — list with optional search + geo filter
-placesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
-  const { q, lat, lng, radius = '10', limit = '50', offset = '0' } = req.query as Record<string, string>
-  const parsedLimit = Number.parseInt(limit, 10)
-  const parsedOffset = Number.parseInt(offset, 10)
-  const safeLimit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 50
-  const safeOffset = Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0
+function inferCuisine(types: string[] | undefined): string | null {
+  if (!types || types.length === 0) return null
+  const candidates = types
+    .map((type) => type.replace(/_restaurant$/, '').replace(/_/g, ' '))
+    .find((type) => type !== 'restaurant' && !type.includes('point of interest'))
+  if (!candidates) return null
+  return candidates
+    .split(' ')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
 
+async function getLocalPlaces(parsed: ListQuery): Promise<PlaceListRow[]> {
   const rows = await db
     .select({
       id: places.id,
@@ -45,44 +143,211 @@ placesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
     .from(places)
     .leftJoin(reviews, eq(reviews.placeId, places.id))
     .groupBy(places.id)
-    .limit(safeLimit)
-    .offset(safeOffset)
+    .limit(parsed.limit)
+    .offset(parsed.offset)
 
   let filtered = rows
-
-  // Filter by text search
-  if (q) {
-    const lower = q.toLowerCase()
+  if (parsed.q) {
+    const lower = parsed.q.toLowerCase()
     filtered = filtered.filter(
-      (p) =>
-        p.name.toLowerCase().includes(lower) ||
-        (p.cuisine?.toLowerCase().includes(lower) ?? false) ||
-        p.address.toLowerCase().includes(lower),
+      (place) =>
+        place.name.toLowerCase().includes(lower) ||
+        (place.cuisine?.toLowerCase().includes(lower) ?? false) ||
+        place.address.toLowerCase().includes(lower),
     )
   }
 
-  // Filter by geo proximity and sort by distance
-  if (lat && lng) {
-    const userLat = parseFloat(lat)
-    const userLng = parseFloat(lng)
-    if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
-      res.status(400).json({ error: 'lat and lng must be valid numbers' })
-      return
-    }
-    const parsedRadius = parseFloat(radius)
-    const radiusKm = Number.isFinite(parsedRadius) ? Math.max(parsedRadius, 0.1) : 10
+  if (parsed.lat !== undefined && parsed.lng !== undefined) {
     filtered = filtered
-      .filter((p) => haversine(userLat, userLng, p.latitude, p.longitude) <= radiusKm)
+      .filter((place) => haversine(parsed.lat!, parsed.lng!, place.latitude, place.longitude) <= parsed.radiusKm)
       .sort(
         (a, b) =>
-          haversine(userLat, userLng, a.latitude, a.longitude) -
-          haversine(userLat, userLng, b.latitude, b.longitude),
+          haversine(parsed.lat!, parsed.lng!, a.latitude, a.longitude) -
+          haversine(parsed.lat!, parsed.lng!, b.latitude, b.longitude),
       )
   } else {
     filtered.sort((a, b) => (Number(b.avgRating) ?? 0) - (Number(a.avgRating) ?? 0))
   }
 
-  res.json(filtered)
+  return filtered.map((row) => ({
+    ...row,
+    avgRating: Number(row.avgRating),
+    reviewCount: Number(row.reviewCount),
+  }))
+}
+
+async function decoratePlaceState(rows: PlaceListRow[], userId: string): Promise<PlaceListRow[]> {
+  if (rows.length === 0) return rows
+  const placeIds = rows.map((row) => row.id)
+
+  const [savedRows, visitedRows] = await Promise.all([
+    db.query.saves.findMany({
+      where: and(eq(saves.userId, userId), inArray(saves.placeId, placeIds)),
+      columns: { placeId: true },
+    }),
+    db.query.visits.findMany({
+      where: and(eq(visits.userId, userId), inArray(visits.placeId, placeIds)),
+      columns: { placeId: true, id: true },
+      orderBy: (table) => [desc(table.visitedAt)],
+    }),
+  ])
+
+  const savedSet = new Set(savedRows.map((row) => row.placeId))
+  const visitMap = new Map<string, string>()
+  for (const row of visitedRows) {
+    if (!visitMap.has(row.placeId)) visitMap.set(row.placeId, row.id)
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    isSaved: savedSet.has(row.id),
+    isVisited: visitMap.has(row.id),
+    visitId: visitMap.get(row.id) ?? null,
+  }))
+}
+
+async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<PlaceListRow[] | null> {
+  if (PLACES_PROVIDER !== 'google' || !GOOGLE_MAPS_API_KEY) return null
+  if (parsed.lat === undefined || parsed.lng === undefined) return null
+
+  const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+      'X-Goog-FieldMask':
+        'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.types',
+    },
+    body: JSON.stringify({
+      textQuery: parsed.q ?? 'restaurants',
+      pageSize: parsed.limit,
+      locationBias: {
+        circle: {
+          center: { latitude: parsed.lat, longitude: parsed.lng },
+          radius: Math.round(parsed.radiusKm * 1000),
+        },
+      },
+      rankPreference: 'DISTANCE',
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Places provider failed: HTTP ${response.status}`)
+  }
+
+  const body = (await response.json()) as { places?: GooglePlace[] }
+  const providerPlaces = (body.places ?? []).filter(
+    (place): place is GooglePlace =>
+      !!place.id &&
+      !!place.displayName?.text &&
+      !!place.formattedAddress &&
+      Number.isFinite(place.location?.latitude) &&
+      Number.isFinite(place.location?.longitude),
+  )
+
+  if (providerPlaces.length === 0) return []
+
+  const upsertedRows: PlaceListRow[] = []
+  for (const providerPlace of providerPlaces) {
+    const [upserted] = await db
+      .insert(places)
+      .values({
+        name: providerPlace.displayName!.text!,
+        address: providerPlace.formattedAddress!,
+        latitude: providerPlace.location!.latitude!,
+        longitude: providerPlace.location!.longitude!,
+        googlePlaceId: providerPlace.id,
+        cuisine: inferCuisine(providerPlace.types),
+      })
+      .onConflictDoUpdate({
+        target: places.googlePlaceId,
+        set: {
+          name: providerPlace.displayName!.text!,
+          address: providerPlace.formattedAddress!,
+          latitude: providerPlace.location!.latitude!,
+          longitude: providerPlace.location!.longitude!,
+          cuisine: inferCuisine(providerPlace.types),
+        },
+      })
+      .returning({
+        id: places.id,
+        name: places.name,
+        cuisine: places.cuisine,
+        description: places.description,
+        address: places.address,
+        latitude: places.latitude,
+        longitude: places.longitude,
+        priceLevel: places.priceLevel,
+        imageUrl: places.imageUrl,
+        googlePlaceId: places.googlePlaceId,
+        createdAt: places.createdAt,
+      })
+
+    upsertedRows.push({
+      ...upserted,
+      avgRating: providerPlace.rating ?? 0,
+      reviewCount: 0,
+    })
+  }
+
+  return decoratePlaceState(upsertedRows, userId)
+}
+
+// GET /api/places â€” list with optional search + geo filter
+placesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
+  const parsed = parseListQuery(req.query as Record<string, string>)
+
+  if ((req.query.lat && parsed.lat === undefined) || (req.query.lng && parsed.lng === undefined)) {
+    res.status(400).json({ error: 'lat and lng must be valid numbers' })
+    return
+  }
+
+  const rows = await getLocalPlaces(parsed)
+  res.json(rows)
+})
+
+// GET /api/places/nearby — provider-backed nearby places with local fallback
+placesRouter.get('/nearby', requireAuth, async (req: AuthRequest, res) => {
+  const parsed = parseListQuery(req.query as Record<string, string>)
+  if (parsed.lat === undefined || parsed.lng === undefined) {
+    res.status(400).json({ error: 'lat and lng are required' })
+    return
+  }
+
+  const ip = getClientIp(req)
+  if (!allowNearbyRequest(ip)) {
+    res.status(429).json({ error: 'Too many nearby place requests. Try again shortly.' })
+    return
+  }
+
+  const cacheKey = JSON.stringify({
+    userId: req.user!.id,
+    q: parsed.q ?? '',
+    lat: parsed.lat,
+    lng: parsed.lng,
+    radiusKm: parsed.radiusKm,
+    limit: parsed.limit,
+    offset: parsed.offset,
+  })
+  const cached = nearbyCache.get(cacheKey)
+  if (cached && cached.expiresAt > nowMs()) {
+    res.json(cached.data)
+    return
+  }
+
+  let rows: PlaceListRow[]
+  try {
+    const providerRows = await fetchGoogleNearby(parsed, req.user!.id)
+    rows = providerRows ?? (await getLocalPlaces(parsed))
+  } catch {
+    rows = await getLocalPlaces(parsed)
+  }
+
+  nearbyCache.set(cacheKey, {
+    expiresAt: nowMs() + PLACES_CACHE_TTL_MS,
+    data: rows,
+  })
+  res.json(rows)
 })
 
 // GET /api/places/:id — single place with review stats + user context
@@ -110,7 +375,7 @@ placesRouter.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   const placeReviews = await db.query.reviews.findMany({
     where: eq(reviews.placeId, placeId),
     with: { user: true },
-    orderBy: (r, { desc }) => [desc(r.createdAt)],
+    orderBy: (table, { desc }) => [desc(table.createdAt)],
   })
 
   const saved = await db.query.saves.findFirst({
@@ -133,15 +398,15 @@ placesRouter.get('/:id', requireAuth, async (req: AuthRequest, res) => {
     isVisited: !!visit,
     visitId: visit?.id ?? null,
     userReview: userReview ?? null,
-    reviews: placeReviews.map((r) => ({
-      id: r.id,
-      rating: r.rating,
-      body: r.body,
-      createdAt: r.createdAt,
+    reviews: placeReviews.map((review) => ({
+      id: review.id,
+      rating: review.rating,
+      body: review.body,
+      createdAt: review.createdAt,
       user: {
-        id: r.user.id,
-        displayName: r.user.displayName,
-        avatarUrl: r.user.avatarUrl,
+        id: review.user.id,
+        displayName: review.user.displayName,
+        avatarUrl: review.user.avatarUrl,
       },
     })),
   })

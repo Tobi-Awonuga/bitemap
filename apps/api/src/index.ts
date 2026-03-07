@@ -32,6 +32,9 @@ function assertRuntimeConfig(): void {
   if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change_me_in_production') {
     throw new Error('JWT_SECRET must be changed in production')
   }
+  if ((process.env.PLACES_PROVIDER ?? 'local').toLowerCase() === 'google' && !process.env.GOOGLE_MAPS_API_KEY) {
+    throw new Error('GOOGLE_MAPS_API_KEY is required when PLACES_PROVIDER=google')
+  }
 }
 
 app.use(cors())

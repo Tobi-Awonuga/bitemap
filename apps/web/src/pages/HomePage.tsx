@@ -27,7 +27,8 @@ export default function HomePage() {
         params.set('lat', String(coords.lat))
         params.set('lng', String(coords.lng))
       }
-      const data = await api.get<Place[]>(`/api/places?${params}`)
+      const endpoint = coords ? '/api/places/nearby' : '/api/places'
+      const data = await api.get<Place[]>(`${endpoint}?${params}`)
       setPlaces(data)
     } catch {
       setPlaces([])

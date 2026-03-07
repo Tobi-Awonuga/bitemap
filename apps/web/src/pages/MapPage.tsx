@@ -1,15 +1,103 @@
-import { Search, SlidersHorizontal, Star, MapPin } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Search, SlidersHorizontal, Star, MapPin, Loader2, LocateFixed } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { api } from '../lib/api'
+import { useGeolocation } from '../hooks/useGeolocation'
 
-const SIDEBAR_PLACES = [
-  { id: '1', name: 'Nobu London', cuisine: 'Japanese', rating: 4.8, distance: '0.3 mi', gradient: 'from-slate-700 to-slate-900' },
-  { id: '2', name: 'Sketch', cuisine: 'Contemporary', rating: 4.7, distance: '0.5 mi', gradient: 'from-pink-400 to-rose-500' },
-  { id: '3', name: 'Dishoom', cuisine: 'Indian', rating: 4.9, distance: '0.8 mi', gradient: 'from-amber-500 to-orange-600' },
-  { id: '4', name: 'The Clove Club', cuisine: 'British', rating: 4.6, distance: '1.1 mi', gradient: 'from-emerald-400 to-teal-600' },
-  { id: '5', name: 'Brat', cuisine: 'Basque', rating: 4.8, distance: '1.4 mi', gradient: 'from-blue-500 to-indigo-600' },
-]
+type MapPlace = {
+  id: string
+  name: string
+  cuisine?: string | null
+  rating?: number
+  avgRating: number
+  address: string
+  latitude: number
+  longitude: number
+}
+
+function kmToMiles(km: number): number {
+  return km * 0.621371
+}
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function project(value: number, min: number, max: number): number {
+  if (max === min) return 50
+  return ((value - min) / (max - min)) * 80 + 10
+}
 
 export default function MapPage() {
+  const [places, setPlaces] = useState<MapPlace[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [radiusKm, setRadiusKm] = useState(8)
+  const [activeCuisine, setActiveCuisine] = useState('All')
+  const { coords, permission, error: geoError, requestLocation } = useGeolocation()
+
+  useEffect(() => {
+    const fetchPlaces = async () => {
+      setLoading(true)
+      try {
+        const params = new URLSearchParams()
+        if (search.trim()) params.set('q', search.trim())
+        if (coords) {
+          params.set('lat', String(coords.lat))
+          params.set('lng', String(coords.lng))
+          params.set('radius', String(radiusKm))
+        }
+        const data = await api.get<MapPlace[]>(`/api/places/nearby?${params}`)
+        setPlaces(data)
+        setError(null)
+      } catch (err) {
+        setPlaces([])
+        setError(err instanceof Error ? err.message : 'Failed to load map places')
+      } finally {
+        setLoading(false)
+      }
+    }
+    void fetchPlaces()
+  }, [coords, radiusKm, search])
+
+  const cuisines = useMemo(() => {
+    const values = new Set<string>()
+    places.forEach((place) => {
+      if (place.cuisine) values.add(place.cuisine)
+    })
+    return ['All', ...Array.from(values).sort((a, b) => a.localeCompare(b))]
+  }, [places])
+
+  const filteredPlaces = useMemo(() => {
+    if (activeCuisine === 'All') return places
+    return places.filter((place) => place.cuisine === activeCuisine)
+  }, [activeCuisine, places])
+
+  const placeBounds = useMemo(() => {
+    if (filteredPlaces.length === 0) return null
+    return {
+      minLat: Math.min(...filteredPlaces.map((place) => place.latitude)),
+      maxLat: Math.max(...filteredPlaces.map((place) => place.latitude)),
+      minLng: Math.min(...filteredPlaces.map((place) => place.longitude)),
+      maxLng: Math.max(...filteredPlaces.map((place) => place.longitude)),
+    }
+  }, [filteredPlaces])
+
+  const listedPlaces = useMemo(() => {
+    return filteredPlaces.map((place) => {
+      if (!coords) return { ...place, distanceMiles: null as number | null }
+      const km = haversineKm(coords.lat, coords.lng, place.latitude, place.longitude)
+      return { ...place, distanceMiles: kmToMiles(km) }
+    })
+  }, [coords, filteredPlaces])
+
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
       {/* Sidebar */}
@@ -20,19 +108,40 @@ export default function MapPage() {
             <Search className="w-4 h-4 text-slate-400 shrink-0" />
             <input
               type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="Search on map..."
               className="flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
             />
           </div>
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition-colors">
-              <SlidersHorizontal className="w-3 h-3" />
-              Filters
+            <button
+              onClick={requestLocation}
+              className="flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg px-3 py-1.5 transition-colors"
+            >
+              <LocateFixed className="w-3 h-3" />
+              {coords ? 'Refresh location' : 'Use location'}
             </button>
-            {['Japanese', 'Italian', 'Vegan'].map((tag) => (
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg px-3 py-1.5">
+              <SlidersHorizontal className="w-3 h-3" />
+              <span>{radiusKm}km</span>
+            </div>
+          </div>
+          <input
+            type="range"
+            min={2}
+            max={25}
+            value={radiusKm}
+            onChange={(e) => setRadiusKm(Number(e.target.value))}
+            className="w-full accent-orange-500"
+          />
+          <div className="flex items-center gap-2 overflow-x-auto">
+            {cuisines.map((tag) => (
               <button
                 key={tag}
+                onClick={() => setActiveCuisine(tag)}
                 className="text-xs font-medium text-slate-600 bg-slate-100 hover:bg-orange-50 hover:text-orange-500 rounded-lg px-3 py-1.5 transition-colors"
+                data-active={activeCuisine === tag}
               >
                 {tag}
               </button>
@@ -43,37 +152,54 @@ export default function MapPage() {
         {/* Results count */}
         <div className="px-4 py-3 border-b border-slate-100">
           <p className="text-xs text-slate-400 font-medium">
-            <span className="text-slate-900 font-semibold">{SIDEBAR_PLACES.length}</span> places nearby
+            <span className="text-slate-900 font-semibold">{listedPlaces.length}</span> places nearby
           </p>
+          {permission === 'denied' && (
+            <p className="text-xs text-amber-600 mt-1">Location blocked. Showing global results.</p>
+          )}
+          {geoError && <p className="text-xs text-red-500 mt-1">{geoError}</p>}
+          {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
         </div>
 
         {/* Place list */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
-          {SIDEBAR_PLACES.map((place) => (
-            <Link
-              key={place.id}
-              to={`/places/${place.id}`}
-              className="flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors group"
-            >
-              <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${place.gradient} shrink-0`} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-900 group-hover:text-orange-500 transition-colors truncate">
-                  {place.name}
-                </p>
-                <p className="text-xs text-orange-500 font-medium">{place.cuisine}</p>
-              </div>
-              <div className="shrink-0 flex flex-col items-end gap-1">
-                <div className="flex items-center gap-1">
-                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                  <span className="text-xs font-semibold text-slate-700">{place.rating}</span>
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+            </div>
+          ) : listedPlaces.length === 0 ? (
+            <div className="px-4 py-10 text-center">
+              <p className="text-sm text-slate-500">No places match current filters.</p>
+            </div>
+          ) : (
+            listedPlaces.map((place) => (
+              <Link
+                key={place.id}
+                to={`/places/${place.id}`}
+                className="flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 group-hover:text-orange-500 transition-colors truncate">
+                    {place.name}
+                  </p>
+                  <p className="text-xs text-orange-500 font-medium">{place.cuisine ?? 'Uncategorized'}</p>
                 </div>
-                <div className="flex items-center gap-0.5 text-xs text-slate-400">
-                  <MapPin className="w-3 h-3" />
-                  {place.distance}
+                <div className="shrink-0 flex flex-col items-end gap-1">
+                  <div className="flex items-center gap-1">
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                    <span className="text-xs font-semibold text-slate-700">
+                      {place.avgRating > 0 ? place.avgRating.toFixed(1) : '-'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-0.5 text-xs text-slate-400">
+                    <MapPin className="w-3 h-3" />
+                    {place.distanceMiles !== null ? `${place.distanceMiles.toFixed(1)} mi` : 'unknown'}
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            ))
+          )}
         </div>
       </aside>
 
@@ -90,43 +216,35 @@ export default function MapPage() {
             backgroundSize: '48px 48px',
           }}
         />
-        {/* Road-like lines */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center space-y-3">
-            <div className="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center mx-auto shadow-xl shadow-orange-200">
-              <MapPin className="w-8 h-8 text-white" />
-            </div>
-            <div>
-              <p className="font-semibold text-slate-700">Interactive map</p>
-              <p className="text-sm text-slate-400 mt-1">Map integration coming soon</p>
-            </div>
-          </div>
-        </div>
 
-        {/* Mock place pins */}
-        <div className="absolute top-1/4 left-1/3">
-          <div className="relative group cursor-pointer">
-            <div className="bg-white rounded-full px-2.5 py-1 shadow-md flex items-center gap-1.5 hover:scale-105 transition-transform">
-              <div className="w-2 h-2 rounded-full bg-orange-500" />
-              <span className="text-xs font-semibold text-slate-800">Nobu</span>
+        {placeBounds && listedPlaces.length > 0 ? (
+          listedPlaces.map((place) => {
+            const left = project(place.longitude, placeBounds.minLng, placeBounds.maxLng)
+            const top = 100 - project(place.latitude, placeBounds.minLat, placeBounds.maxLat)
+            return (
+              <div key={place.id} className="absolute" style={{ left: `${left}%`, top: `${top}%` }}>
+                <Link to={`/places/${place.id}`} className="relative group block -translate-x-1/2 -translate-y-1/2">
+                  <div className="bg-white rounded-full px-2.5 py-1 shadow-md flex items-center gap-1.5 hover:scale-105 transition-transform">
+                    <div className="w-2 h-2 rounded-full bg-orange-500" />
+                    <span className="text-xs font-semibold text-slate-800 truncate max-w-28">{place.name}</span>
+                  </div>
+                </Link>
+              </div>
+            )
+          })
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center space-y-3">
+              <div className="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center mx-auto shadow-xl shadow-orange-200">
+                <MapPin className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-slate-700">No map points yet</p>
+                <p className="text-sm text-slate-400 mt-1">Try broadening search or radius</p>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="absolute top-1/3 left-1/2">
-          <div className="relative group cursor-pointer">
-            <div className="bg-orange-500 rounded-full px-2.5 py-1 shadow-md flex items-center gap-1.5 hover:scale-105 transition-transform">
-              <span className="text-xs font-semibold text-white">Sketch</span>
-            </div>
-          </div>
-        </div>
-        <div className="absolute top-1/2 left-2/3">
-          <div className="relative group cursor-pointer">
-            <div className="bg-white rounded-full px-2.5 py-1 shadow-md flex items-center gap-1.5 hover:scale-105 transition-transform">
-              <div className="w-2 h-2 rounded-full bg-orange-500" />
-              <span className="text-xs font-semibold text-slate-800">Dishoom</span>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )
