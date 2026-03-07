@@ -64,6 +64,7 @@ export default function MapPage() {
       try {
         const params = new URLSearchParams()
         if (search.trim()) params.set('q', search.trim())
+        params.set('limit', '24')
         if (coords) {
           params.set('lat', String(coords.lat))
           params.set('lng', String(coords.lng))

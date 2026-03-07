@@ -6,6 +6,15 @@ import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
 import { visitSchema } from '@bitemap/shared'
 
 export const visitsRouter = Router()
+const GOOGLE_PHOTO_PREFIX = 'gphoto:'
+
+function serializeImageUrl(placeId: string, imageUrl: string | null): string | null {
+  if (!imageUrl) return null
+  if (imageUrl.startsWith(GOOGLE_PHOTO_PREFIX)) {
+    return `/api/places/${placeId}/image`
+  }
+  return imageUrl
+}
 
 // GET /api/visits — all visits for the current user with place data
 visitsRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
@@ -15,7 +24,15 @@ visitsRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
     orderBy: (visits, { desc }) => [desc(visits.visitedAt)],
   })
 
-  res.json(userVisits)
+  res.json(
+    userVisits.map((visit) => ({
+      ...visit,
+      place: {
+        ...visit.place,
+        imageUrl: serializeImageUrl(visit.place.id, visit.place.imageUrl),
+      },
+    })),
+  )
 })
 
 // POST /api/visits — { placeId, visitedAt? }

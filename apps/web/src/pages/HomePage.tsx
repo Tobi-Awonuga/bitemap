@@ -23,6 +23,7 @@ export default function HomePage() {
       const cuisine = tag && tag !== 'All' ? tag : ''
       if (query) params.set('q', query)
       else if (cuisine) params.set('q', cuisine)
+      params.set('limit', '24')
       if (coords) {
         params.set('lat', String(coords.lat))
         params.set('lng', String(coords.lng))

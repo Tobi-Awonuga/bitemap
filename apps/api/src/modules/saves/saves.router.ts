@@ -6,6 +6,15 @@ import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
 import { saveSchema } from '@bitemap/shared'
 
 export const savesRouter = Router()
+const GOOGLE_PHOTO_PREFIX = 'gphoto:'
+
+function serializeImageUrl(placeId: string, imageUrl: string | null): string | null {
+  if (!imageUrl) return null
+  if (imageUrl.startsWith(GOOGLE_PHOTO_PREFIX)) {
+    return `/api/places/${placeId}/image`
+  }
+  return imageUrl
+}
 
 // GET /api/saves — all saves for the current user with place data
 savesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
@@ -15,7 +24,15 @@ savesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
     orderBy: (saves, { desc }) => [desc(saves.createdAt)],
   })
 
-  res.json(userSaves)
+  res.json(
+    userSaves.map((save) => ({
+      ...save,
+      place: {
+        ...save.place,
+        imageUrl: serializeImageUrl(save.place.id, save.place.imageUrl),
+      },
+    })),
+  )
 })
 
 // POST /api/saves — { placeId }
