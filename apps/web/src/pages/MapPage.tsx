@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, SlidersHorizontal, Star, MapPin, Loader2, LocateFixed } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { Circle, CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { api } from '../lib/api'
 import { useGeolocation } from '../hooks/useGeolocation'
 
@@ -8,13 +11,14 @@ type MapPlace = {
   id: string
   name: string
   cuisine?: string | null
-  rating?: number
   avgRating: number
   address: string
   latitude: number
   longitude: number
   imageUrl?: string | null
 }
+
+const DEFAULT_CENTER: [number, number] = [43.6532, -79.3832]
 
 function kmToMiles(km: number): number {
   return km * 0.621371
@@ -28,11 +32,6 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function project(value: number, min: number, max: number): number {
-  if (max === min) return 50
-  return ((value - min) / (max - min)) * 80 + 10
 }
 
 const FALLBACK_GRADIENTS = [
@@ -49,39 +48,94 @@ function gradientFor(id: string): string {
   return FALLBACK_GRADIENTS[sum % FALLBACK_GRADIENTS.length]
 }
 
+function ViewportController({
+  coords,
+  places,
+  radiusKm,
+}: {
+  coords: { lat: number; lng: number } | null
+  places: MapPlace[]
+  radiusKm: number
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (coords) {
+      const bounds = L.latLngBounds([coords.lat, coords.lng], [coords.lat, coords.lng])
+      places.forEach((place) => bounds.extend([place.latitude, place.longitude]))
+      if (places.length > 0) {
+        map.fitBounds(bounds.pad(0.2), { animate: true, duration: 0.5 })
+      } else {
+        map.setView([coords.lat, coords.lng], Math.max(12, 16 - Math.round(radiusKm / 3)))
+      }
+      return
+    }
+    if (places.length > 0) {
+      const bounds = L.latLngBounds(
+        places.map((place) => [place.latitude, place.longitude] as [number, number]),
+      )
+      map.fitBounds(bounds.pad(0.2), { animate: true, duration: 0.5 })
+    }
+  }, [coords, map, places, radiusKm])
+
+  return null
+}
+
 export default function MapPage() {
   const [places, setPlaces] = useState<MapPlace[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [radiusKm, setRadiusKm] = useState(8)
   const [activeCuisine, setActiveCuisine] = useState('All')
   const { coords, permission, error: geoError, requestLocation } = useGeolocation()
+  const cacheRef = useRef(new Map<string, MapPlace[]>())
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const requestUrl = useMemo(() => {
+    const params = new URLSearchParams()
+    if (debouncedSearch) params.set('q', debouncedSearch)
+    params.set('limit', '24')
+    if (coords) {
+      params.set('lat', String(coords.lat))
+      params.set('lng', String(coords.lng))
+      params.set('radius', String(radiusKm))
+    }
+    return `/api/places/nearby?${params}`
+  }, [coords, debouncedSearch, radiusKm])
 
   useEffect(() => {
     const fetchPlaces = async () => {
-      setLoading(true)
+      const cached = cacheRef.current.get(requestUrl)
+      if (cached) {
+        setPlaces(cached)
+        setLoading(false)
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+        setRefreshing(false)
+      }
       try {
-        const params = new URLSearchParams()
-        if (search.trim()) params.set('q', search.trim())
-        params.set('limit', '24')
-        if (coords) {
-          params.set('lat', String(coords.lat))
-          params.set('lng', String(coords.lng))
-          params.set('radius', String(radiusKm))
-        }
-        const data = await api.get<MapPlace[]>(`/api/places/nearby?${params}`)
+        const data = await api.get<MapPlace[]>(requestUrl)
+        cacheRef.current.set(requestUrl, data)
         setPlaces(data)
         setError(null)
       } catch (err) {
-        setPlaces([])
+        if (!cached) setPlaces([])
         setError(err instanceof Error ? err.message : 'Failed to load map places')
       } finally {
         setLoading(false)
+        setRefreshing(false)
       }
     }
     void fetchPlaces()
-  }, [coords, radiusKm, search])
+  }, [requestUrl])
 
   const cuisines = useMemo(() => {
     const values = new Set<string>()
@@ -96,16 +150,6 @@ export default function MapPage() {
     return places.filter((place) => place.cuisine === activeCuisine)
   }, [activeCuisine, places])
 
-  const placeBounds = useMemo(() => {
-    if (filteredPlaces.length === 0) return null
-    return {
-      minLat: Math.min(...filteredPlaces.map((place) => place.latitude)),
-      maxLat: Math.max(...filteredPlaces.map((place) => place.latitude)),
-      minLng: Math.min(...filteredPlaces.map((place) => place.longitude)),
-      maxLng: Math.max(...filteredPlaces.map((place) => place.longitude)),
-    }
-  }, [filteredPlaces])
-
   const listedPlaces = useMemo(() => {
     return filteredPlaces.map((place) => {
       if (!coords) return { ...place, distanceMiles: null as number | null }
@@ -116,9 +160,7 @@ export default function MapPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-full sm:w-80 lg:w-96 flex flex-col bg-white border-r border-slate-100 shrink-0 overflow-hidden">
-        {/* Search + filter */}
         <div className="p-4 border-b border-slate-100 space-y-3">
           <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-200">
             <Search className="w-4 h-4 text-slate-400 shrink-0" />
@@ -157,7 +199,6 @@ export default function MapPage() {
                 key={tag}
                 onClick={() => setActiveCuisine(tag)}
                 className="text-xs font-medium text-slate-600 bg-slate-100 hover:bg-orange-50 hover:text-orange-500 rounded-lg px-3 py-1.5 transition-colors"
-                data-active={activeCuisine === tag}
               >
                 {tag}
               </button>
@@ -165,19 +206,18 @@ export default function MapPage() {
           </div>
         </div>
 
-        {/* Results count */}
         <div className="px-4 py-3 border-b border-slate-100">
           <p className="text-xs text-slate-400 font-medium">
             <span className="text-slate-900 font-semibold">{listedPlaces.length}</span> places nearby
           </p>
+          {refreshing && <p className="text-xs text-slate-500 mt-1">Refreshing nearby places...</p>}
           {permission === 'denied' && (
-            <p className="text-xs text-amber-600 mt-1">Location blocked. Showing global results.</p>
+            <p className="text-xs text-amber-600 mt-1">Location blocked. Showing broader results.</p>
           )}
           {geoError && <p className="text-xs text-red-500 mt-1">{geoError}</p>}
           {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
         </div>
 
-        {/* Place list */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
           {loading ? (
             <div className="flex items-center justify-center py-10">
@@ -225,45 +265,61 @@ export default function MapPage() {
         </div>
       </aside>
 
-      {/* Map area */}
-      <div className="flex-1 relative bg-slate-200 overflow-hidden hidden sm:block">
-        {/* Grid pattern to simulate a map */}
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
-            backgroundImage: `
-              linear-gradient(to right, #94a3b8 1px, transparent 1px),
-              linear-gradient(to bottom, #94a3b8 1px, transparent 1px)
-            `,
-            backgroundSize: '48px 48px',
-          }}
-        />
+      <div className="flex-1 relative overflow-hidden hidden sm:block">
+        <MapContainer
+          center={coords ? [coords.lat, coords.lng] : DEFAULT_CENTER}
+          zoom={13}
+          scrollWheelZoom
+          className="h-full w-full"
+        >
+          <TileLayer
+            attribution='&copy; OpenStreetMap contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <ViewportController coords={coords} places={filteredPlaces} radiusKm={radiusKm} />
 
-        {placeBounds && listedPlaces.length > 0 ? (
-          listedPlaces.map((place) => {
-            const left = project(place.longitude, placeBounds.minLng, placeBounds.maxLng)
-            const top = 100 - project(place.latitude, placeBounds.minLat, placeBounds.maxLat)
-            return (
-              <div key={place.id} className="absolute" style={{ left: `${left}%`, top: `${top}%` }}>
-                <Link to={`/places/${place.id}`} className="relative group block -translate-x-1/2 -translate-y-1/2">
-                  <div className="bg-white rounded-full px-2.5 py-1 shadow-md flex items-center gap-1.5 hover:scale-105 transition-transform">
-                    <div className="w-2 h-2 rounded-full bg-orange-500" />
-                    <span className="text-xs font-semibold text-slate-800 truncate max-w-28">{place.name}</span>
-                  </div>
-                </Link>
-              </div>
-            )
-          })
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center space-y-3">
-              <div className="w-16 h-16 bg-orange-500 rounded-2xl flex items-center justify-center mx-auto shadow-xl shadow-orange-200">
-                <MapPin className="w-8 h-8 text-white" />
-              </div>
-              <div>
-                <p className="font-semibold text-slate-700">No map points yet</p>
-                <p className="text-sm text-slate-400 mt-1">Try broadening search or radius</p>
-              </div>
+          {coords && (
+            <>
+              <Circle
+                center={[coords.lat, coords.lng]}
+                radius={radiusKm * 1000}
+                pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 0.08 }}
+              />
+              <CircleMarker
+                center={[coords.lat, coords.lng]}
+                radius={8}
+                pathOptions={{ color: '#1d4ed8', fillColor: '#2563eb', fillOpacity: 1, weight: 2 }}
+              >
+                <Popup>You are here</Popup>
+              </CircleMarker>
+            </>
+          )}
+
+          {filteredPlaces.map((place) => (
+            <CircleMarker
+              key={place.id}
+              center={[place.latitude, place.longitude]}
+              radius={6}
+              pathOptions={{ color: '#ea580c', fillColor: '#f97316', fillOpacity: 0.95, weight: 1 }}
+            >
+              <Popup>
+                <div className="space-y-1">
+                  <p className="font-semibold text-slate-900">{place.name}</p>
+                  <p className="text-xs text-slate-500">{place.address}</p>
+                  <Link to={`/places/${place.id}`} className="text-xs text-orange-600 font-medium">
+                    Open details
+                  </Link>
+                </div>
+              </Popup>
+            </CircleMarker>
+          ))}
+        </MapContainer>
+
+        {!loading && filteredPlaces.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="bg-white/95 rounded-2xl px-5 py-4 shadow-sm border border-slate-200 text-center">
+              <p className="font-semibold text-slate-700">No map points yet</p>
+              <p className="text-sm text-slate-500 mt-1">Try broadening search or radius</p>
             </div>
           </div>
         )}

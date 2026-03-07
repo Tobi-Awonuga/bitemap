@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Search, MapPin, TrendingUp, Sparkles, Loader2 } from 'lucide-react'
 import PlaceCard, { type Place } from '../components/ui/PlaceCard'
 import { api } from '../lib/api'
@@ -11,45 +11,65 @@ const CUISINE_TAGS = [
 export default function HomePage() {
   const [places, setPlaces] = useState<Place[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeTag, setActiveTag] = useState('All')
   const { coords } = useGeolocation()
-
-  const fetchPlaces = useCallback(async (q?: string, tag?: string) => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams()
-      const query = q ?? ''
-      const cuisine = tag && tag !== 'All' ? tag : ''
-      if (query) params.set('q', query)
-      else if (cuisine) params.set('q', cuisine)
-      params.set('limit', '24')
-      if (coords) {
-        params.set('lat', String(coords.lat))
-        params.set('lng', String(coords.lng))
-      }
-      const endpoint = coords ? '/api/places/nearby' : '/api/places'
-      const data = await api.get<Place[]>(`${endpoint}?${params}`)
-      setPlaces(data)
-    } catch {
-      setPlaces([])
-    } finally {
-      setLoading(false)
-    }
-  }, [coords])
+  const cacheRef = useRef(new Map<string, Place[]>())
 
   useEffect(() => {
-    fetchPlaces(searchQuery, activeTag)
-  }, [coords, fetchPlaces])
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const requestUrl = useMemo(() => {
+    const params = new URLSearchParams()
+    const cuisine = activeTag !== 'All' ? activeTag : ''
+    if (debouncedSearch) params.set('q', debouncedSearch)
+    else if (cuisine) params.set('q', cuisine)
+    params.set('limit', '24')
+    if (coords) {
+      params.set('lat', String(coords.lat))
+      params.set('lng', String(coords.lng))
+    }
+    const endpoint = coords ? '/api/places/nearby' : '/api/places'
+    return `${endpoint}?${params}`
+  }, [activeTag, coords, debouncedSearch])
+
+  const fetchPlaces = useCallback(async (url: string) => {
+    const cached = cacheRef.current.get(url)
+    if (cached) {
+      setPlaces(cached)
+      setLoading(false)
+      setRefreshing(true)
+    } else {
+      setRefreshing(false)
+      setLoading(true)
+    }
+    try {
+      const data = await api.get<Place[]>(url)
+      cacheRef.current.set(url, data)
+      setPlaces(data)
+    } catch {
+      if (!cached) setPlaces([])
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchPlaces(requestUrl)
+  }, [fetchPlaces, requestUrl])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    fetchPlaces(searchQuery, activeTag)
+    setDebouncedSearch(searchQuery.trim())
   }
 
   const handleTagChange = (tag: string) => {
     setActiveTag(tag)
-    fetchPlaces(searchQuery, tag)
   }
 
   const topRated = [...places].sort((a, b) => b.avgRating - a.avgRating).slice(0, 6)
@@ -139,7 +159,9 @@ export default function HomePage() {
                   {coords ? 'Near You' : 'Top Rated'}
                 </h2>
               </div>
-              <span className="text-sm text-slate-400">{places.length} places</span>
+              <span className="text-sm text-slate-400">
+                {refreshing ? 'Refreshing...' : `${places.length} places`}
+              </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {topRated.map((place) => (
