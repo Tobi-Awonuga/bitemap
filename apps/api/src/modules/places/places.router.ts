@@ -52,6 +52,7 @@ type GooglePlace = {
   location?: { latitude?: number; longitude?: number }
   rating?: number
   types?: string[]
+  photos?: Array<{ name?: string }>
 }
 
 const nearbyCache = new Map<string, NearbyCacheEntry>()
@@ -61,6 +62,7 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY ?? ''
 const PLACES_CACHE_TTL_MS = Number(process.env.PLACES_CACHE_TTL_MS ?? 120000)
 const PLACES_RATE_LIMIT_MAX = Number(process.env.PLACES_RATE_LIMIT_MAX ?? 60)
 const PLACES_RATE_LIMIT_WINDOW_MS = 60 * 1000
+const GOOGLE_PHOTO_PREFIX = 'gphoto:'
 
 function nowMs(): number {
   return Date.now()
@@ -123,6 +125,21 @@ function inferCuisine(types: string[] | undefined): string | null {
     .join(' ')
 }
 
+function serializeImageUrl(placeId: string, imageUrl: string | null): string | null {
+  if (!imageUrl) return null
+  if (imageUrl.startsWith(GOOGLE_PHOTO_PREFIX)) {
+    return `/api/places/${placeId}/image`
+  }
+  return imageUrl
+}
+
+function serializePlaceRow(row: PlaceListRow): PlaceListRow {
+  return {
+    ...row,
+    imageUrl: serializeImageUrl(row.id, row.imageUrl),
+  }
+}
+
 async function getLocalPlaces(parsed: ListQuery): Promise<PlaceListRow[]> {
   const rows = await db
     .select({
@@ -169,11 +186,13 @@ async function getLocalPlaces(parsed: ListQuery): Promise<PlaceListRow[]> {
     filtered.sort((a, b) => (Number(b.avgRating) ?? 0) - (Number(a.avgRating) ?? 0))
   }
 
-  return filtered.map((row) => ({
-    ...row,
-    avgRating: Number(row.avgRating),
-    reviewCount: Number(row.reviewCount),
-  }))
+  return filtered.map((row) =>
+    serializePlaceRow({
+      ...row,
+      avgRating: Number(row.avgRating),
+      reviewCount: Number(row.reviewCount),
+    }),
+  )
 }
 
 async function decoratePlaceState(rows: PlaceListRow[], userId: string): Promise<PlaceListRow[]> {
@@ -198,12 +217,14 @@ async function decoratePlaceState(rows: PlaceListRow[], userId: string): Promise
     if (!visitMap.has(row.placeId)) visitMap.set(row.placeId, row.id)
   }
 
-  return rows.map((row) => ({
-    ...row,
-    isSaved: savedSet.has(row.id),
-    isVisited: visitMap.has(row.id),
-    visitId: visitMap.get(row.id) ?? null,
-  }))
+  return rows.map((row) =>
+    serializePlaceRow({
+      ...row,
+      isSaved: savedSet.has(row.id),
+      isVisited: visitMap.has(row.id),
+      visitId: visitMap.get(row.id) ?? null,
+    }),
+  )
 }
 
 async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<PlaceListRow[] | null> {
@@ -216,7 +237,7 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
       'X-Goog-FieldMask':
-        'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.types',
+        'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.types,places.photos',
     },
     body: JSON.stringify({
       textQuery: parsed.q ?? 'restaurants',
@@ -249,6 +270,19 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
 
   const upsertedRows: PlaceListRow[] = []
   for (const providerPlace of providerPlaces) {
+    const primaryPhotoName = providerPlace.photos?.find((photo) => !!photo.name)?.name
+    const providerImageUrl = primaryPhotoName ? `${GOOGLE_PHOTO_PREFIX}${primaryPhotoName}` : null
+    const updateSet: Partial<typeof places.$inferInsert> = {
+      name: providerPlace.displayName!.text!,
+      address: providerPlace.formattedAddress!,
+      latitude: providerPlace.location!.latitude!,
+      longitude: providerPlace.location!.longitude!,
+      cuisine: inferCuisine(providerPlace.types),
+    }
+    if (providerImageUrl) {
+      updateSet.imageUrl = providerImageUrl
+    }
+
     const [upserted] = await db
       .insert(places)
       .values({
@@ -258,16 +292,11 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
         longitude: providerPlace.location!.longitude!,
         googlePlaceId: providerPlace.id,
         cuisine: inferCuisine(providerPlace.types),
+        imageUrl: providerImageUrl,
       })
       .onConflictDoUpdate({
         target: places.googlePlaceId,
-        set: {
-          name: providerPlace.displayName!.text!,
-          address: providerPlace.formattedAddress!,
-          latitude: providerPlace.location!.latitude!,
-          longitude: providerPlace.location!.longitude!,
-          cuisine: inferCuisine(providerPlace.types),
-        },
+        set: updateSet,
       })
       .returning({
         id: places.id,
@@ -283,11 +312,13 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
         createdAt: places.createdAt,
       })
 
-    upsertedRows.push({
-      ...upserted,
-      avgRating: providerPlace.rating ?? 0,
-      reviewCount: 0,
-    })
+    upsertedRows.push(
+      serializePlaceRow({
+        ...upserted,
+        avgRating: providerPlace.rating ?? 0,
+        reviewCount: 0,
+      }),
+    )
   }
 
   return decoratePlaceState(upsertedRows, userId)
@@ -350,6 +381,50 @@ placesRouter.get('/nearby', requireAuth, async (req: AuthRequest, res) => {
   res.json(rows)
 })
 
+// GET /api/places/:id/image - proxy Google photo resources so API keys are never exposed to the client
+placesRouter.get('/:id/image', async (req, res) => {
+  const placeId = String(req.params.id)
+  const place = await db.query.places.findFirst({
+    where: eq(places.id, placeId),
+    columns: { imageUrl: true },
+  })
+
+  if (!place?.imageUrl) {
+    res.status(404).json({ error: 'Image not found' })
+    return
+  }
+
+  if (!place.imageUrl.startsWith(GOOGLE_PHOTO_PREFIX)) {
+    res.redirect(place.imageUrl)
+    return
+  }
+
+  if (!GOOGLE_MAPS_API_KEY) {
+    res.status(503).json({ error: 'Image provider unavailable' })
+    return
+  }
+
+  const photoName = place.imageUrl.slice(GOOGLE_PHOTO_PREFIX.length)
+  if (!photoName) {
+    res.status(404).json({ error: 'Image not found' })
+    return
+  }
+
+  const response = await fetch(
+    `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=480&key=${GOOGLE_MAPS_API_KEY}`,
+  )
+
+  if (!response.ok) {
+    res.status(404).json({ error: 'Image not found' })
+    return
+  }
+
+  const contentType = response.headers.get('content-type') ?? 'image/jpeg'
+  const imageData = Buffer.from(await response.arrayBuffer())
+  res.setHeader('Cache-Control', 'public, max-age=900')
+  res.setHeader('Content-Type', contentType)
+  res.status(200).send(imageData)
+})
 // GET /api/places/:id — single place with review stats + user context
 placesRouter.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   const placeId = String(req.params.id)
@@ -392,6 +467,7 @@ placesRouter.get('/:id', requireAuth, async (req: AuthRequest, res) => {
 
   res.json({
     ...place,
+    imageUrl: serializeImageUrl(place.id, place.imageUrl),
     avgRating: Number(stats?.avgRating ?? 0),
     reviewCount: Number(stats?.reviewCount ?? 0),
     isSaved: !!saved,

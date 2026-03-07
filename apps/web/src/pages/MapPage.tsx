@@ -13,6 +13,7 @@ type MapPlace = {
   address: string
   latitude: number
   longitude: number
+  imageUrl?: string | null
 }
 
 function kmToMiles(km: number): number {
@@ -32,6 +33,20 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 function project(value: number, min: number, max: number): number {
   if (max === min) return 50
   return ((value - min) / (max - min)) * 80 + 10
+}
+
+const FALLBACK_GRADIENTS = [
+  'from-slate-700 to-slate-900',
+  'from-pink-400 to-rose-500',
+  'from-amber-500 to-orange-600',
+  'from-emerald-400 to-teal-600',
+  'from-blue-500 to-indigo-600',
+  'from-violet-500 to-purple-600',
+]
+
+function gradientFor(id: string): string {
+  const sum = id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+  return FALLBACK_GRADIENTS[sum % FALLBACK_GRADIENTS.length]
 }
 
 export default function MapPage() {
@@ -178,7 +193,13 @@ export default function MapPage() {
                 to={`/places/${place.id}`}
                 className="flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors group"
               >
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 shrink-0" />
+                <div
+                  className={`w-12 h-12 rounded-xl shrink-0 overflow-hidden ${!place.imageUrl ? `bg-gradient-to-br ${gradientFor(place.id)}` : 'bg-slate-200'}`}
+                >
+                  {place.imageUrl && (
+                    <img src={place.imageUrl} alt={place.name} className="w-full h-full object-cover" />
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-900 group-hover:text-orange-500 transition-colors truncate">
                     {place.name}
