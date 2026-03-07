@@ -8,6 +8,17 @@ const CUISINE_TAGS = [
   'All', 'Italian', 'Japanese', 'Burgers', 'Vegan', 'Indian', 'Brunch', 'Cocktail Bars', 'Fine Dining', 'British',
 ]
 
+function pickUnique(places: Place[], excluded: Set<string>, limit: number): Place[] {
+  const selected: Place[] = []
+  for (const place of places) {
+    if (excluded.has(place.id)) continue
+    excluded.add(place.id)
+    selected.push(place)
+    if (selected.length >= limit) break
+  }
+  return selected
+}
+
 export default function HomePage() {
   const [places, setPlaces] = useState<Place[]>([])
   const [loading, setLoading] = useState(true)
@@ -15,7 +26,7 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeTag, setActiveTag] = useState('All')
-  const { coords } = useGeolocation()
+  const { coords, permission } = useGeolocation()
   const cacheRef = useRef(new Map<string, Place[]>())
 
   useEffect(() => {
@@ -72,8 +83,32 @@ export default function HomePage() {
     setActiveTag(tag)
   }
 
-  const topRated = [...places].sort((a, b) => b.avgRating - a.avgRating).slice(0, 6)
-  const newest = [...places].slice(0, 3)
+  const curated = useMemo(() => {
+    const excluded = new Set<string>()
+    const nearYou = pickUnique([...places], excluded, 6)
+    const trending = pickUnique(
+      [...places]
+        .filter((place) => place.reviewCount > 0)
+        .sort((a, b) => b.reviewCount - a.reviewCount || b.avgRating - a.avgRating),
+      excluded,
+      6,
+    )
+    const topRated = pickUnique(
+      [...places]
+        .filter((place) => place.reviewCount >= 3 || place.avgRating >= 4.5)
+        .sort((a, b) => b.avgRating - a.avgRating || b.reviewCount - a.reviewCount),
+      excluded,
+      6,
+    )
+    return { nearYou, trending, topRated }
+  }, [places])
+
+  const locationLabel = useMemo(() => {
+    if (coords) return 'Near you'
+    if (permission === 'granted') return 'Locating...'
+    if (permission === 'denied') return 'Location off'
+    return 'Enable location for nearby spots'
+  }, [coords, permission])
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
@@ -83,7 +118,7 @@ export default function HomePage() {
         <div className="relative max-w-xl">
           <div className="flex items-center gap-2 text-orange-400 text-sm font-medium mb-4">
             <MapPin className="w-4 h-4" />
-            <span>{coords ? 'Near you' : 'London, UK'}</span>
+            <span>{locationLabel}</span>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-white leading-tight mb-6">
             What are you<br />
@@ -150,34 +185,46 @@ export default function HomePage() {
         </div>
       ) : (
         <>
-          {/* Top rated */}
+          {/* Near you */}
           <section>
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-orange-500" />
-                <h2 className="text-lg font-bold text-slate-900">
-                  {coords ? 'Near You' : 'Top Rated'}
-                </h2>
+                <h2 className="text-lg font-bold text-slate-900">Near You</h2>
               </div>
               <span className="text-sm text-slate-400">
                 {refreshing ? 'Refreshing...' : `${places.length} places`}
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {topRated.map((place) => (
+              {curated.nearYou.map((place) => (
                 <PlaceCard key={place.id} place={place} />
               ))}
             </div>
           </section>
 
-          {/* Recently added */}
-          {newest.length > 0 && (
+          {/* Trending */}
+          {curated.trending.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-slate-900">Recently Added</h2>
+                <h2 className="text-lg font-bold text-slate-900">Trending Now</h2>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {newest.map((place) => (
+                {curated.trending.map((place) => (
+                  <PlaceCard key={place.id} place={place} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Top rated */}
+          {curated.topRated.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-slate-900">Top Rated</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {curated.topRated.map((place) => (
                   <PlaceCard key={place.id} place={place} />
                 ))}
               </div>

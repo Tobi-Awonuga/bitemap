@@ -9,6 +9,7 @@ type AuthContextValue = {
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (displayName: string, email: string, password: string) => Promise<void>
+  updateProfile: (payload: { displayName?: string; avatarUrl?: string | null }) => Promise<void>
   logout: () => void
 }
 
@@ -47,16 +48,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(user)
   }
 
+  const updateProfile = async (payload: { displayName?: string; avatarUrl?: string | null }) => {
+    const { data } = await api.patch<ApiResponse<AuthUser>>('/api/users/me', payload)
+    setUser(data)
+  }
+
   const logout = () => {
     clearToken()
     setUser(null)
   }
 
-  return (
-    <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>
-      {children}
-    </AuthContext.Provider>
-  )
+  return <AuthContext.Provider value={{ user, isLoading, login, register, updateProfile, logout }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

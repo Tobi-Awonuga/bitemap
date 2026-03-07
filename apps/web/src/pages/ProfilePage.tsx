@@ -89,9 +89,9 @@ export default function ProfilePage() {
               </div>
             </div>
           </div>
-          <button className="w-9 h-9 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center transition-colors">
+          <Link to="/settings" className="w-9 h-9 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center transition-colors">
             <Settings className="w-4 h-4 text-slate-600" />
-          </button>
+          </Link>
         </div>
 
         {/* Stats */}
