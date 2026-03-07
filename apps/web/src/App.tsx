@@ -12,6 +12,7 @@ import PlaceDetailPage from './pages/PlaceDetailPage'
 import SavedPlacesPage from './pages/SavedPlacesPage'
 import VisitedPlacesPage from './pages/VisitedPlacesPage'
 import ProfilePage from './pages/ProfilePage'
+import UserProfilePage from './pages/UserProfilePage'
 import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import AdminPlacesPage from './pages/admin/AdminPlacesPage'
 import AdminUsersPage from './pages/admin/AdminUsersPage'
@@ -35,6 +36,7 @@ export default function App() {
               <Route path="/saved" element={<SavedPlacesPage />} />
               <Route path="/visited" element={<VisitedPlacesPage />} />
               <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/users/:id" element={<UserProfilePage />} />
             </Route>
           </Route>
 

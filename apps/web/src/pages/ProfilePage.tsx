@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Settings, Bookmark, CheckCircle, Star, MapPin, ChevronRight, LogOut, Shield } from 'lucide-react'
+import { Settings, Bookmark, CheckCircle, Star, MapPin, ChevronRight, LogOut, Shield, Loader2, Users, UserPlus } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 
@@ -12,21 +12,39 @@ function formatJoinDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
 }
 
-type Stats = { saves: number; visits: number; reviews: number }
+type Stats = { saves: number; visits: number; reviews: number; followers: number; following: number }
+type FeedItem = {
+  type: 'review' | 'visit'
+  id: string
+  createdAt: string
+  user: { id: string; displayName: string }
+  place: { id: string; name: string; cuisine?: string | null }
+  review?: { rating: number; body?: string | null }
+}
 
 export default function ProfilePage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [stats, setStats] = useState<Stats>({ saves: 0, visits: 0, reviews: 0 })
+  const [stats, setStats] = useState<Stats>({ saves: 0, visits: 0, reviews: 0, followers: 0, following: 0 })
+  const [feed, setFeed] = useState<FeedItem[]>([])
+  const [feedLoading, setFeedLoading] = useState(true)
 
   useEffect(() => {
     if (!user) return
-    Promise.all([
-      api.get<unknown[]>('/api/saves').catch(() => []),
-      api.get<unknown[]>('/api/visits').catch(() => []),
-    ]).then(([saves, visits]) => {
-      setStats({ saves: saves.length, visits: visits.length, reviews: 0 })
-    })
+    api
+      .get<{ data: Stats }>('/api/users/me/stats')
+      .then((res) => setStats(res.data))
+      .catch(() => setStats({ saves: 0, visits: 0, reviews: 0, followers: 0, following: 0 }))
+  }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    setFeedLoading(true)
+    api
+      .get<{ data: FeedItem[] }>('/api/users/feed')
+      .then((res) => setFeed(res.data))
+      .catch(() => setFeed([]))
+      .finally(() => setFeedLoading(false))
   }, [user])
 
   const handleLogout = () => {
@@ -37,6 +55,8 @@ export default function ProfilePage() {
   if (!user) return null
 
   const statCards = [
+    { label: 'Followers', value: stats.followers, icon: Users },
+    { label: 'Following', value: stats.following, icon: UserPlus },
     { label: 'Saved', value: stats.saves, icon: Bookmark },
     { label: 'Visited', value: stats.visits, icon: CheckCircle },
     { label: 'Reviews', value: stats.reviews, icon: Star },
@@ -75,7 +95,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           {statCards.map(({ label, value, icon: Icon }) => (
             <div key={label} className="bg-slate-50 rounded-xl p-3 text-center">
               <Icon className="w-4 h-4 text-orange-500 mx-auto mb-1" />
@@ -84,6 +104,40 @@ export default function ProfilePage() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm p-6">
+        <h2 className="text-base font-bold text-slate-900 mb-4">Following feed</h2>
+        {feedLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading activity...
+          </div>
+        ) : feed.length === 0 ? (
+          <p className="text-sm text-slate-500">Follow people to see their latest visits and reviews.</p>
+        ) : (
+          <div className="space-y-4">
+            {feed.slice(0, 8).map((item) => (
+              <div key={`${item.type}-${item.id}`} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
+                <div className="text-sm text-slate-700">
+                  <Link to={`/users/${item.user.id}`} className="font-semibold text-slate-900 hover:text-orange-600">
+                    {item.user.displayName}
+                  </Link>{' '}
+                  {item.type === 'review' ? 'reviewed' : 'visited'}{' '}
+                  <Link to={`/places/${item.place.id}`} className="font-semibold text-slate-900 hover:text-orange-600">
+                    {item.place.name}
+                  </Link>
+                </div>
+                {item.type === 'review' && item.review && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    {item.review.rating.toFixed(1)} stars
+                    {item.review.body ? ` - ${item.review.body}` : ''}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Quick actions */}

@@ -85,12 +85,25 @@ export const placeTags = pgTable('place_tags', {
   tagId: uuid('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' }),
 })
 
+export const follows = pgTable('follows', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  followerId: uuid('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  followingId: uuid('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  followerFollowingUnique: uniqueIndex('follows_follower_following_unique').on(table.followerId, table.followingId),
+  followerIdx: index('follows_follower_id_idx').on(table.followerId),
+  followingIdx: index('follows_following_id_idx').on(table.followingId),
+}))
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
   saves: many(saves),
   visits: many(visits),
   reviews: many(reviews),
+  followers: many(follows, { relationName: 'following' }),
+  following: many(follows, { relationName: 'follower' }),
 }))
 
 export const placesRelations = relations(places, ({ many }) => ({
@@ -124,4 +137,17 @@ export const tagsRelations = relations(tags, ({ many }) => ({
 export const placeTagsRelations = relations(placeTags, ({ one }) => ({
   place: one(places, { fields: [placeTags.placeId], references: [places.id] }),
   tag: one(tags, { fields: [placeTags.tagId], references: [tags.id] }),
+}))
+
+export const followsRelations = relations(follows, ({ one }) => ({
+  follower: one(users, {
+    fields: [follows.followerId],
+    references: [users.id],
+    relationName: 'follower',
+  }),
+  following: one(users, {
+    fields: [follows.followingId],
+    references: [users.id],
+    relationName: 'following',
+  }),
 }))

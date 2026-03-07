@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2,
 } from 'lucide-react'
@@ -47,6 +47,7 @@ function formatDate(dateStr: string): string {
 
 export default function PlaceDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [place, setPlace] = useState<PlaceDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -176,6 +177,13 @@ export default function PlaceDetailPage() {
 
   const gradient = gradientFor(place.id)
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.latitude},${place.longitude}`
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1)
+      return
+    }
+    navigate('/')
+  }
 
   return (
     <div className="max-w-3xl mx-auto pb-16">
@@ -188,13 +196,13 @@ export default function PlaceDetailPage() {
         )}
         <div className="absolute inset-0 bg-black/20" />
 
-        <Link
-          to="/"
+        <button
+          onClick={handleBack}
           className="absolute top-5 left-5 flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-3 py-2 text-sm font-medium text-slate-800 hover:bg-white transition-colors shadow-sm"
         >
           <ArrowLeft className="w-4 h-4" />
           Back
-        </Link>
+        </button>
 
         <div className="absolute top-5 right-5 flex items-center gap-1.5 bg-white/95 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm">
           <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
@@ -420,9 +428,12 @@ export default function PlaceDetailPage() {
                           {getInitials(review.user.displayName)}
                         </span>
                       </div>
-                      <span className="text-sm font-semibold text-slate-900">
+                      <Link
+                        to={`/users/${review.user.id}`}
+                        className="text-sm font-semibold text-slate-900 hover:text-orange-600 transition-colors"
+                      >
                         {review.user.displayName}
-                      </span>
+                      </Link>
                     </div>
                     <div className="flex items-center gap-1">
                       {[1, 2, 3, 4, 5].map((i) => (
