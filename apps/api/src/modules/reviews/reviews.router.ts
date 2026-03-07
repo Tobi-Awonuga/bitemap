@@ -3,7 +3,7 @@ import { eq, and } from 'drizzle-orm'
 import { db } from '../../db'
 import { reviews, visits } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
-import { reviewSchema } from '@bitemap/shared'
+import { reviewSchema, reviewUpdateSchema } from '@bitemap/shared'
 
 export const reviewsRouter = Router()
 
@@ -77,4 +77,29 @@ reviewsRouter.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
     .where(and(eq(reviews.id, String(req.params.id)), eq(reviews.userId, req.user!.id)))
 
   res.status(204).send()
+})
+
+// PATCH /api/reviews/:id — only the author can edit
+reviewsRouter.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
+  const parsed = reviewUpdateSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten().fieldErrors })
+    return
+  }
+
+  const [updated] = await db
+    .update(reviews)
+    .set({
+      rating: parsed.data.rating,
+      body: parsed.data.body,
+    })
+    .where(and(eq(reviews.id, String(req.params.id)), eq(reviews.userId, req.user!.id)))
+    .returning()
+
+  if (!updated) {
+    res.status(404).json({ error: 'Review not found' })
+    return
+  }
+
+  res.json({ data: updated })
 })

@@ -34,6 +34,11 @@ export const reviewSchema = z.object({
   body: z.string().optional(),
 })
 
+export const reviewUpdateSchema = z.object({
+  rating: z.number().min(1).max(5),
+  body: z.string().optional(),
+})
+
 export const saveSchema = z.object({
   placeId: z.string().uuid(),
 })
@@ -47,5 +52,6 @@ export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type PlaceInput = z.infer<typeof placeSchema>
 export type ReviewInput = z.infer<typeof reviewSchema>
+export type ReviewUpdateInput = z.infer<typeof reviewUpdateSchema>
 export type SaveInput = z.infer<typeof saveSchema>
 export type VisitInput = z.infer<typeof visitSchema>

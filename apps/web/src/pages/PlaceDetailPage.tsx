@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send,
+  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2,
 } from 'lucide-react'
 import { api } from '../lib/api'
 
@@ -58,7 +58,13 @@ export default function PlaceDetailPage() {
   const [reviewRating, setReviewRating] = useState(5)
   const [reviewBody, setReviewBody] = useState('')
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
+  const [reviewDeleting, setReviewDeleting] = useState(false)
   const [reviewError, setReviewError] = useState<string | null>(null)
+
+  const refreshPlace = async (placeId: string) => {
+    const updated = await api.get<PlaceDetail>(`/api/places/${placeId}`)
+    setPlace(updated)
+  }
 
   useEffect(() => {
     if (!id) return
@@ -107,9 +113,12 @@ export default function PlaceDetailPage() {
     setReviewSubmitting(true)
     setReviewError(null)
     try {
-      await api.post('/api/reviews', { placeId: place.id, rating: reviewRating, body: reviewBody })
-      const updated = await api.get<PlaceDetail>(`/api/places/${place.id}`)
-      setPlace(updated)
+      if (place.userReview) {
+        await api.patch(`/api/reviews/${place.userReview.id}`, { rating: reviewRating, body: reviewBody })
+      } else {
+        await api.post('/api/reviews', { placeId: place.id, rating: reviewRating, body: reviewBody })
+      }
+      await refreshPlace(place.id)
       setShowReviewForm(false)
       setReviewBody('')
       setReviewRating(5)
@@ -117,6 +126,31 @@ export default function PlaceDetailPage() {
       setReviewError(err instanceof Error ? err.message : 'Failed to submit review')
     } finally {
       setReviewSubmitting(false)
+    }
+  }
+
+  const startReviewEditor = () => {
+    if (!place) return
+    setReviewError(null)
+    setReviewRating(place.userReview?.rating ?? 5)
+    setReviewBody(place.userReview?.body ?? '')
+    setShowReviewForm(true)
+  }
+
+  const handleDeleteReview = async () => {
+    if (!place?.userReview || reviewDeleting) return
+    setReviewDeleting(true)
+    setReviewError(null)
+    try {
+      await api.del(`/api/reviews/${place.userReview.id}`)
+      await refreshPlace(place.id)
+      setShowReviewForm(false)
+      setReviewBody('')
+      setReviewRating(5)
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Failed to delete review')
+    } finally {
+      setReviewDeleting(false)
     }
   }
 
@@ -268,12 +302,19 @@ export default function PlaceDetailPage() {
                 <span className="text-slate-400 font-normal">({place.reviewCount})</span>
               )}
             </h2>
-            {place.isVisited && !place.userReview && (
+            {place.isVisited && (
               <button
-                onClick={() => setShowReviewForm((v) => !v)}
+                onClick={() => {
+                  if (place.userReview) {
+                    startReviewEditor()
+                    return
+                  }
+                  setReviewError(null)
+                  setShowReviewForm((v) => !v)
+                }}
                 className="text-sm text-orange-500 hover:text-orange-600 font-medium"
               >
-                {showReviewForm ? 'Cancel' : 'Write a review'}
+                {place.userReview ? 'Edit your review' : showReviewForm ? 'Cancel' : 'Write a review'}
               </button>
             )}
             {!place.isVisited && (
@@ -321,7 +362,7 @@ export default function PlaceDetailPage() {
                 className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-semibold text-sm px-4 py-2 rounded-lg transition-colors"
               >
                 {reviewSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Submit Review
+                {place.userReview ? 'Save changes' : 'Submit review'}
               </button>
             </form>
           )}
@@ -343,6 +384,23 @@ export default function PlaceDetailPage() {
               {place.userReview.body && (
                 <p className="text-sm text-slate-700">{place.userReview.body}</p>
               )}
+              <div className="mt-3 flex items-center gap-3">
+                <button
+                  onClick={startReviewEditor}
+                  className="text-xs text-orange-600 font-medium inline-flex items-center gap-1"
+                >
+                  <Pencil className="w-3 h-3" />
+                  Edit
+                </button>
+                <button
+                  onClick={handleDeleteReview}
+                  disabled={reviewDeleting}
+                  className="text-xs text-red-600 font-medium inline-flex items-center gap-1 disabled:opacity-60"
+                >
+                  {reviewDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                  Delete
+                </button>
+              </div>
             </div>
           )}
 
