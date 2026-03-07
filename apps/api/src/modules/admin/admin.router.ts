@@ -27,11 +27,11 @@ adminRouter.get('/stats', async (_req, res) => {
   })
 
   res.json({
-    totalUsers,
-    totalPlaces,
-    totalReviews,
-    totalSaves,
-    totalVisits,
+    totalUsers: Number(totalUsers),
+    totalPlaces: Number(totalPlaces),
+    totalReviews: Number(totalReviews),
+    totalSaves: Number(totalSaves),
+    totalVisits: Number(totalVisits),
     recentReviews: recentReviews.map((r) => ({
       id: r.id,
       rating: r.rating,
@@ -64,7 +64,14 @@ adminRouter.get('/users', async (_req, res) => {
     .groupBy(users.id)
     .orderBy(desc(users.createdAt))
 
-  res.json(allUsers)
+  res.json(
+    allUsers.map((user) => ({
+      ...user,
+      saveCount: Number(user.saveCount),
+      visitCount: Number(user.visitCount),
+      reviewCount: Number(user.reviewCount),
+    })),
+  )
 })
 
 // PATCH /api/admin/users/:id — update user role
@@ -134,7 +141,14 @@ adminRouter.get('/places', async (_req, res) => {
     .groupBy(places.id)
     .orderBy(desc(places.createdAt))
 
-  res.json(allPlaces)
+  res.json(
+    allPlaces.map((place) => ({
+      ...place,
+      avgRating: Number(place.avgRating),
+      reviewCount: Number(place.reviewCount),
+      saveCount: Number(place.saveCount),
+    })),
+  )
 })
 
 // DELETE /api/admin/places/:id

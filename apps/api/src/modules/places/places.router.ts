@@ -21,6 +21,10 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
 // GET /api/places — list with optional search + geo filter
 placesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
   const { q, lat, lng, radius = '10', limit = '50', offset = '0' } = req.query as Record<string, string>
+  const parsedLimit = Number.parseInt(limit, 10)
+  const parsedOffset = Number.parseInt(offset, 10)
+  const safeLimit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 50
+  const safeOffset = Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0
 
   const rows = await db
     .select({
@@ -41,8 +45,8 @@ placesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
     .from(places)
     .leftJoin(reviews, eq(reviews.placeId, places.id))
     .groupBy(places.id)
-    .limit(parseInt(limit))
-    .offset(parseInt(offset))
+    .limit(safeLimit)
+    .offset(safeOffset)
 
   let filtered = rows
 
@@ -61,7 +65,12 @@ placesRouter.get('/', requireAuth, async (req: AuthRequest, res) => {
   if (lat && lng) {
     const userLat = parseFloat(lat)
     const userLng = parseFloat(lng)
-    const radiusKm = parseFloat(radius)
+    if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
+      res.status(400).json({ error: 'lat and lng must be valid numbers' })
+      return
+    }
+    const parsedRadius = parseFloat(radius)
+    const radiusKm = Number.isFinite(parsedRadius) ? Math.max(parsedRadius, 0.1) : 10
     filtered = filtered
       .filter((p) => haversine(userLat, userLng, p.latitude, p.longitude) <= radiusKm)
       .sort(

@@ -36,10 +36,29 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    throw new Error(body.error ?? `HTTP ${res.status}`)
+    const message = getErrorMessage(body.error, res.status)
+    throw new Error(message)
   }
 
   return body as T
+}
+
+function getErrorMessage(rawError: unknown, status: number): string {
+  if (typeof rawError === 'string' && rawError.trim()) {
+    return rawError
+  }
+
+  if (rawError && typeof rawError === 'object') {
+    const values = Object.values(rawError as Record<string, unknown>)
+    const messages = values
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    if (messages.length > 0) {
+      return messages.join(', ')
+    }
+  }
+
+  return `HTTP ${status}`
 }
 
 export const api = {

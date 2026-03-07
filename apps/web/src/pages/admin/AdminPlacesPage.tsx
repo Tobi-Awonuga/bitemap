@@ -33,6 +33,7 @@ const emptyForm: NewPlace = {
 export default function AdminPlacesPage() {
   const [places, setPlaces] = useState<AdminPlace[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<NewPlace>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
@@ -43,7 +44,10 @@ export default function AdminPlacesPage() {
     api
       .get<AdminPlace[]>('/api/admin/places')
       .then(setPlaces)
-      .catch(() => setPlaces([]))
+      .catch((err) => {
+        setPlaces([])
+        setError(err instanceof Error ? err.message : 'Failed to load places')
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -64,6 +68,7 @@ export default function AdminPlacesPage() {
       }
       const place = await api.post<AdminPlace>('/api/places', payload)
       setPlaces((prev) => [{ ...place, avgRating: 0, reviewCount: 0, saveCount: 0 }, ...prev])
+      setError(null)
       setForm(emptyForm)
       setShowForm(false)
     } catch (err) {
@@ -79,6 +84,9 @@ export default function AdminPlacesPage() {
     try {
       await api.del(`/api/admin/places/${id}`)
       setPlaces((prev) => prev.filter((p) => p.id !== id))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete place')
     } finally {
       setDeletingId(null)
     }
@@ -105,6 +113,7 @@ export default function AdminPlacesPage() {
           Add Place
         </button>
       </div>
+      {error && <p className="text-sm text-red-400">{error}</p>}
 
       {/* Add form */}
       {showForm && (

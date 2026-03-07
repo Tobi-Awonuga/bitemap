@@ -56,10 +56,16 @@ reviewsRouter.post('/', requireAuth, async (req: AuthRequest, res) => {
     return
   }
 
-  const [review] = await db
-    .insert(reviews)
-    .values({ userId: req.user!.id, placeId, visitId: visit.id, rating, body })
-    .returning()
+  let review: typeof reviews.$inferSelect
+  try {
+    ;[review] = await db
+      .insert(reviews)
+      .values({ userId: req.user!.id, placeId, visitId: visit.id, rating, body })
+      .returning()
+  } catch {
+    res.status(409).json({ error: 'You have already reviewed this place' })
+    return
+  }
 
   res.status(201).json({ data: review })
 })

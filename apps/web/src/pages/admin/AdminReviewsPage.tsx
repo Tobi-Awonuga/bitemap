@@ -19,13 +19,17 @@ function formatDate(dateStr: string): string {
 export default function AdminReviewsPage() {
   const [reviews, setReviews] = useState<AdminReview[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     api
       .get<AdminReview[]>('/api/admin/reviews')
       .then(setReviews)
-      .catch(() => setReviews([]))
+      .catch((err) => {
+        setReviews([])
+        setError(err instanceof Error ? err.message : 'Failed to load reviews')
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -35,6 +39,9 @@ export default function AdminReviewsPage() {
     try {
       await api.del(`/api/admin/reviews/${id}`)
       setReviews((prev) => prev.filter((r) => r.id !== id))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete review')
     } finally {
       setDeletingId(null)
     }
@@ -46,6 +53,7 @@ export default function AdminReviewsPage() {
         <h1 className="text-2xl font-bold text-white">Reviews</h1>
         <p className="text-slate-400 text-sm mt-1">{reviews.length} reviews total</p>
       </div>
+      {error && <p className="text-sm text-red-400">{error}</p>}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

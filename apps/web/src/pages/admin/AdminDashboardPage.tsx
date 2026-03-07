@@ -34,12 +34,19 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     api
       .get<AdminStats>('/api/admin/stats')
-      .then(setStats)
-      .catch(() => setStats(null))
+      .then((data) => {
+        setStats(data)
+        setError(null)
+      })
+      .catch((err) => {
+        setStats(null)
+        setError(err instanceof Error ? err.message : 'Failed to load dashboard data')
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -57,6 +64,7 @@ export default function AdminDashboardPage() {
         <h1 className="text-2xl font-bold text-white">Dashboard</h1>
         <p className="text-slate-400 text-sm mt-1">Overview of your BiteMap platform</p>
       </div>
+      {error && <p className="text-sm text-red-400">{error}</p>}
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">

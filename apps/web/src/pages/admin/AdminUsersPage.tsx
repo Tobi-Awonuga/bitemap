@@ -22,6 +22,7 @@ export default function AdminUsersPage() {
   const { user: currentUser } = useAuth()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -29,7 +30,10 @@ export default function AdminUsersPage() {
     api
       .get<AdminUser[]>('/api/admin/users')
       .then(setUsers)
-      .catch(() => setUsers([]))
+      .catch((err) => {
+        setUsers([])
+        setError(err instanceof Error ? err.message : 'Failed to load users')
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -39,6 +43,9 @@ export default function AdminUsersPage() {
     try {
       await api.patch(`/api/admin/users/${user.id}`, { role: newRole })
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: newRole } : u)))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update role')
     } finally {
       setUpdatingId(null)
     }
@@ -50,6 +57,9 @@ export default function AdminUsersPage() {
     try {
       await api.del(`/api/admin/users/${user.id}`)
       setUsers((prev) => prev.filter((u) => u.id !== user.id))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete user')
     } finally {
       setDeletingId(null)
     }
@@ -61,6 +71,7 @@ export default function AdminUsersPage() {
         <h1 className="text-2xl font-bold text-white">Users</h1>
         <p className="text-slate-400 text-sm mt-1">{users.length} registered users</p>
       </div>
+      {error && <p className="text-sm text-red-400">{error}</p>}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
