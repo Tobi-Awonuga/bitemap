@@ -1,18 +1,74 @@
 import { Router } from 'express'
+import { eq, and } from 'drizzle-orm'
+import { db } from '../../db'
+import { reviews, visits } from '../../db/schema'
+import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
+import { reviewSchema } from '@bitemap/shared'
 
 export const reviewsRouter = Router()
 
 // GET /api/reviews?placeId=
-reviewsRouter.get('/', (_req, res) => {
-  res.status(501).json({ error: 'Not implemented' })
+reviewsRouter.get('/', async (req, res) => {
+  const { placeId } = req.query
+  if (!placeId || typeof placeId !== 'string') {
+    res.status(400).json({ error: 'placeId query param is required' })
+    return
+  }
+
+  const placeReviews = await db.query.reviews.findMany({
+    where: eq(reviews.placeId, placeId),
+    with: {
+      user: {
+        columns: { id: true, displayName: true, avatarUrl: true },
+      },
+    },
+    orderBy: (reviews, { desc }) => [desc(reviews.createdAt)],
+  })
+
+  res.json({ data: placeReviews })
 })
 
-// POST /api/reviews
-reviewsRouter.post('/', (_req, res) => {
-  res.status(501).json({ error: 'Not implemented' })
+// POST /api/reviews — requires a visit record for the place
+reviewsRouter.post('/', requireAuth, async (req: AuthRequest, res) => {
+  const parsed = reviewSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten().fieldErrors })
+    return
+  }
+
+  const { placeId, rating, body } = parsed.data
+
+  // Gate: user must have visited the place
+  const visit = await db.query.visits.findFirst({
+    where: and(eq(visits.userId, req.user!.id), eq(visits.placeId, placeId)),
+  })
+  if (!visit) {
+    res.status(403).json({ error: 'You can only review places you have visited' })
+    return
+  }
+
+  // One review per place per user
+  const existing = await db.query.reviews.findFirst({
+    where: and(eq(reviews.userId, req.user!.id), eq(reviews.placeId, placeId)),
+  })
+  if (existing) {
+    res.status(409).json({ error: 'You have already reviewed this place' })
+    return
+  }
+
+  const [review] = await db
+    .insert(reviews)
+    .values({ userId: req.user!.id, placeId, visitId: visit.id, rating, body })
+    .returning()
+
+  res.status(201).json({ data: review })
 })
 
-// DELETE /api/reviews/:id
-reviewsRouter.delete('/:id', (_req, res) => {
-  res.status(501).json({ error: 'Not implemented' })
+// DELETE /api/reviews/:id — only the author can delete
+reviewsRouter.delete('/:id', requireAuth, async (req: AuthRequest, res) => {
+  await db
+    .delete(reviews)
+    .where(and(eq(reviews.id, String(req.params.id)), eq(reviews.userId, req.user!.id)))
+
+  res.status(204).send()
 })

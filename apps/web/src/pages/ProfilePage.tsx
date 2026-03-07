@@ -1,20 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Settings, Bookmark, CheckCircle, Star, MapPin, ChevronRight, LogOut } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import PlaceCard, { type Place } from '../components/ui/PlaceCard'
-
-const USER = {
-  name: 'Tobi Awonuga',
-  email: 'tobi@example.com',
-  initials: 'TA',
-  bio: 'Food explorer. Always chasing the next great bite.',
-  joinedDate: 'March 2026',
-}
-
-const STATS = [
-  { label: 'Saved', value: 3, icon: Bookmark },
-  { label: 'Visited', value: 3, icon: CheckCircle },
-  { label: 'Reviews', value: 2, icon: Star },
-]
 
 const RECENT_SAVES: Place[] = [
   {
@@ -41,8 +29,36 @@ const RECENT_SAVES: Place[] = [
 
 type Tab = 'saved' | 'visited'
 
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+}
+
+function formatJoinDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+}
+
 export default function ProfilePage() {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Tab>('saved')
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
+  if (!user) return null
+
+  const stats = [
+    { label: 'Saved', value: 0, icon: Bookmark },
+    { label: 'Visited', value: 0, icon: CheckCircle },
+    { label: 'Reviews', value: 0, icon: Star },
+  ]
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
@@ -50,16 +66,17 @@ export default function ProfilePage() {
       <div className="bg-white rounded-2xl shadow-sm p-6">
         <div className="flex items-start justify-between mb-6">
           <div className="flex items-center gap-4">
-            {/* Avatar */}
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center shadow-sm">
-              <span className="text-white font-bold text-xl">{USER.initials}</span>
+              <span className="text-white font-bold text-xl">{getInitials(user.displayName)}</span>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">{USER.name}</h1>
-              <p className="text-sm text-slate-500">{USER.email}</p>
+              <h1 className="text-xl font-bold text-slate-900">{user.displayName}</h1>
+              <p className="text-sm text-slate-500">{user.email}</p>
               <div className="flex items-center gap-1 mt-1">
                 <MapPin className="w-3 h-3 text-slate-400" />
-                <span className="text-xs text-slate-400">Member since {USER.joinedDate}</span>
+                <span className="text-xs text-slate-400">
+                  Member since {formatJoinDate(user.createdAt)}
+                </span>
               </div>
             </div>
           </div>
@@ -68,12 +85,9 @@ export default function ProfilePage() {
           </button>
         </div>
 
-        {/* Bio */}
-        <p className="text-sm text-slate-600 leading-relaxed mb-6">{USER.bio}</p>
-
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
-          {STATS.map(({ label, value, icon: Icon }) => (
+          {stats.map(({ label, value, icon: Icon }) => (
             <div key={label} className="bg-slate-50 rounded-xl p-3 text-center">
               <Icon className="w-4 h-4 text-orange-500 mx-auto mb-1" />
               <p className="text-xl font-bold text-slate-900">{value}</p>
@@ -103,7 +117,7 @@ export default function ProfilePage() {
         ))}
       </div>
 
-      {/* Tabs — recent activity */}
+      {/* Recent activity tabs */}
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
         <div className="flex border-b border-slate-100">
           {(['saved', 'visited'] as Tab[]).map((tab) => (
@@ -128,7 +142,10 @@ export default function ProfilePage() {
       </div>
 
       {/* Sign out */}
-      <button className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-slate-200 text-slate-500 hover:text-red-500 hover:border-red-200 hover:bg-red-50 text-sm font-medium transition-colors">
+      <button
+        onClick={handleLogout}
+        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-slate-200 text-slate-500 hover:text-red-500 hover:border-red-200 hover:bg-red-50 text-sm font-medium transition-colors"
+      >
         <LogOut className="w-4 h-4" />
         Sign out
       </button>

@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { Outlet, NavLink, Link } from 'react-router-dom'
-import { Map, Bookmark, CheckCircle, User } from 'lucide-react'
+import { Map, Bookmark, CheckCircle, User, MapPin, X } from 'lucide-react'
+import { useAuth } from '../../context/AuthContext'
+import { useGeolocation } from '../../hooks/useGeolocation'
 
 const navLinks = [
   { to: '/', label: 'Discover', end: true },
@@ -8,7 +11,29 @@ const navLinks = [
   { to: '/visited', label: 'Visited' },
 ]
 
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
+}
+
 export default function AppShell() {
+  const { user } = useAuth()
+  const { permission, requestLocation } = useGeolocation()
+  const [locationDismissed, setLocationDismissed] = useState(
+    () => localStorage.getItem('bm_loc_dismissed') === 'true',
+  )
+
+  const dismissLocation = () => {
+    localStorage.setItem('bm_loc_dismissed', 'true')
+    setLocationDismissed(true)
+  }
+
+  const showLocationBanner = !locationDismissed && permission === 'prompt'
+
   return (
     <div className="min-h-screen flex flex-col bg-stone-50">
       <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-sm">
@@ -41,73 +66,65 @@ export default function AppShell() {
             ))}
           </nav>
 
-          {/* Profile */}
+          {/* Profile avatar with initials */}
           <Link
             to="/profile"
-            className="w-9 h-9 bg-slate-900 rounded-full flex items-center justify-center hover:bg-slate-700 transition-colors"
+            className="w-9 h-9 bg-slate-900 hover:bg-slate-700 rounded-full flex items-center justify-center transition-colors shrink-0"
           >
-            <User className="w-4 h-4 text-white" />
+            {user ? (
+              <span className="text-white text-xs font-bold">{getInitials(user.displayName)}</span>
+            ) : (
+              <User className="w-4 h-4 text-white" />
+            )}
           </Link>
         </div>
 
+        {/* Location permission banner */}
+        {showLocationBanner && (
+          <div className="bg-orange-50 border-t border-orange-100 px-6 py-2.5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-orange-500 shrink-0" />
+              <span className="text-sm text-slate-700">
+                Enable location for nearby recommendations
+              </span>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={requestLocation}
+                className="text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Allow
+              </button>
+              <button onClick={dismissLocation} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Mobile bottom nav */}
         <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-100 flex items-center justify-around px-2 py-2">
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                isActive ? 'text-orange-500' : 'text-slate-400'
-              }`
-            }
-          >
-            <Map className="w-5 h-5" />
-            Discover
-          </NavLink>
-          <NavLink
-            to="/map"
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                isActive ? 'text-orange-500' : 'text-slate-400'
-              }`
-            }
-          >
-            <Map className="w-5 h-5" />
-            Map
-          </NavLink>
-          <NavLink
-            to="/saved"
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                isActive ? 'text-orange-500' : 'text-slate-400'
-              }`
-            }
-          >
-            <Bookmark className="w-5 h-5" />
-            Saved
-          </NavLink>
-          <NavLink
-            to="/visited"
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                isActive ? 'text-orange-500' : 'text-slate-400'
-              }`
-            }
-          >
-            <CheckCircle className="w-5 h-5" />
-            Visited
-          </NavLink>
-          <NavLink
-            to="/profile"
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-                isActive ? 'text-orange-500' : 'text-slate-400'
-              }`
-            }
-          >
-            <User className="w-5 h-5" />
-            Profile
-          </NavLink>
+          {[
+            { to: '/', icon: Map, label: 'Discover', end: true },
+            { to: '/map', icon: Map, label: 'Map', end: false },
+            { to: '/saved', icon: Bookmark, label: 'Saved', end: false },
+            { to: '/visited', icon: CheckCircle, label: 'Visited', end: false },
+            { to: '/profile', icon: User, label: 'Profile', end: false },
+          ].map(({ to, icon: Icon, label, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+                  isActive ? 'text-orange-500' : 'text-slate-400'
+                }`
+              }
+            >
+              <Icon className="w-5 h-5" />
+              {label}
+            </NavLink>
+          ))}
         </div>
       </header>
 

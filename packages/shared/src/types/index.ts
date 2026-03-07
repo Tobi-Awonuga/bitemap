@@ -20,9 +20,29 @@ export interface Review {
   id: string
   userId: string
   placeId: string
+  visitId?: string
   rating: number
   body?: string
   createdAt: string
+}
+
+export interface Save {
+  id: string
+  userId: string
+  placeId: string
+  createdAt: string
+}
+
+export interface Visit {
+  id: string
+  userId: string
+  placeId: string
+  visitedAt: string
+}
+
+export interface AuthResponse {
+  token: string
+  user: Pick<User, 'id' | 'email' | 'displayName' | 'avatarUrl' | 'createdAt'>
 }
 
 export interface ApiResponse<T> {
