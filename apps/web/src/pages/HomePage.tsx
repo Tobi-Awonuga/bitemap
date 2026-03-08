@@ -192,6 +192,9 @@ export default function HomePage() {
 
   const handleTagChange = (tag: string) => {
     setActiveTag(tag)
+    // Cuisine chip selection should act as its own filter context.
+    setSearchQuery('')
+    setDebouncedSearch('')
   }
 
   const curated = useMemo(() => {
