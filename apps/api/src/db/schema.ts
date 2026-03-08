@@ -5,6 +5,7 @@ import {
   timestamp,
   doublePrecision,
   integer,
+  boolean,
   uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core'
@@ -19,6 +20,8 @@ export const users = pgTable('users', {
   displayName: text('display_name').notNull(),
   avatarUrl: text('avatar_url'),
   role: text('role', { enum: ['user', 'admin'] }).notNull().default('user'),
+  isActive: boolean('is_active').notNull().default(true),
+  deactivatedAt: timestamp('deactivated_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 

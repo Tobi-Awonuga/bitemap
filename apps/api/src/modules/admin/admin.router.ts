@@ -101,6 +101,8 @@ adminRouter.get('/users', async (_req, res) => {
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       role: users.role,
+      isActive: users.isActive,
+      deactivatedAt: users.deactivatedAt,
       createdAt: users.createdAt,
       saveCount: sql<number>`COUNT(DISTINCT ${saves.id})`.as('save_count'),
       visitCount: sql<number>`COUNT(DISTINCT ${visits.id})`.as('visit_count'),
@@ -126,18 +128,41 @@ adminRouter.get('/users', async (_req, res) => {
 // PATCH /api/admin/users/:id — update user role
 adminRouter.patch('/users/:id', async (req: AuthRequest, res) => {
   const userId = String(req.params.id)
-  const { role } = req.body
+  const { role, isActive } = req.body
 
-  if (!['user', 'admin'].includes(role)) {
+  if (role !== undefined && !['user', 'admin'].includes(role)) {
     res.status(400).json({ error: 'Invalid role' })
+    return
+  }
+  if (isActive !== undefined && typeof isActive !== 'boolean') {
+    res.status(400).json({ error: 'Invalid isActive value' })
+    return
+  }
+  if (userId === req.user!.id && isActive === false) {
+    res.status(400).json({ error: 'Cannot deactivate your own account' })
+    return
+  }
+
+  if (role === undefined && isActive === undefined) {
+    res.status(400).json({ error: 'No valid fields to update' })
     return
   }
 
   const [updated] = await db
     .update(users)
-    .set({ role })
+    .set({
+      ...(role !== undefined ? { role } : {}),
+      ...(isActive !== undefined ? { isActive, deactivatedAt: isActive ? null : new Date() } : {}),
+    })
     .where(eq(users.id, userId))
-    .returning({ id: users.id, email: users.email, displayName: users.displayName, role: users.role })
+    .returning({
+      id: users.id,
+      email: users.email,
+      displayName: users.displayName,
+      role: users.role,
+      isActive: users.isActive,
+      deactivatedAt: users.deactivatedAt,
+    })
 
   if (!updated) {
     res.status(404).json({ error: 'User not found' })

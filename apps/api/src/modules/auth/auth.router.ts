@@ -68,6 +68,7 @@ authRouter.post('/register', async (req, res) => {
     displayName: string
     avatarUrl: string | null
     role: 'admin' | 'user'
+    isActive: boolean
     createdAt: Date
   }
   try {
@@ -80,6 +81,7 @@ authRouter.post('/register', async (req, res) => {
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
         role: users.role,
+        isActive: users.isActive,
         createdAt: users.createdAt,
       })
   } catch {
@@ -118,6 +120,10 @@ authRouter.post('/login', async (req, res) => {
   const valid = await bcrypt.compare(password, user.passwordHash)
   if (!valid) {
     res.status(401).json({ error: 'Invalid email or password' })
+    return
+  }
+  if (!user.isActive) {
+    res.status(403).json({ error: 'Account is deactivated. Contact support.' })
     return
   }
   clearLoginAttempts(clientKey)

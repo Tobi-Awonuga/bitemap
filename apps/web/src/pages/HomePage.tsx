@@ -7,6 +7,7 @@ import { useGeolocation } from '../hooks/useGeolocation'
 const CUISINE_TAGS = [
   'All', 'Italian', 'Japanese', 'Burgers', 'Vegan', 'Indian', 'Brunch', 'Cocktail Bars', 'Fine Dining', 'British',
 ]
+const DISCOVER_CACHE_KEY = 'bm_discover_cache'
 
 function pickUnique(places: Place[], excluded: Set<string>, limit: number): Place[] {
   const selected: Place[] = []
@@ -20,8 +21,17 @@ function pickUnique(places: Place[], excluded: Set<string>, limit: number): Plac
 }
 
 export default function HomePage() {
-  const [places, setPlaces] = useState<Place[]>([])
-  const [loading, setLoading] = useState(true)
+  const [places, setPlaces] = useState<Place[]>(() => {
+    try {
+      const raw = sessionStorage.getItem(DISCOVER_CACHE_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as Place[]
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
+  const [loading, setLoading] = useState(() => places.length === 0)
   const [refreshing, setRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -62,6 +72,7 @@ export default function HomePage() {
       const data = await api.get<Place[]>(url)
       cacheRef.current.set(url, data)
       setPlaces(data)
+      sessionStorage.setItem(DISCOVER_CACHE_KEY, JSON.stringify(data))
     } catch {
       if (!cached) setPlaces([])
     } finally {

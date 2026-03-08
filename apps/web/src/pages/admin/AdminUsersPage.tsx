@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Loader2, Shield, User, Trash2 } from 'lucide-react'
+import { Loader2, Shield, User, Trash2, UserX, UserCheck } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 
@@ -8,6 +8,8 @@ type AdminUser = {
   email: string
   displayName: string
   role: 'user' | 'admin'
+  isActive: boolean
+  deactivatedAt?: string | null
   createdAt: string
   saveCount: number
   visitCount: number
@@ -25,6 +27,7 @@ export default function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
 
   useEffect(() => {
     api
@@ -62,6 +65,22 @@ export default function AdminUsersPage() {
       setError(err instanceof Error ? err.message : 'Failed to delete user')
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const toggleActive = async (user: AdminUser) => {
+    if (!confirm(`${user.isActive ? 'Deactivate' : 'Reactivate'} "${user.displayName}"?`)) return
+    setStatusUpdatingId(user.id)
+    try {
+      const updated = await api.patch<Pick<AdminUser, 'id' | 'isActive' | 'deactivatedAt'>>(`/api/admin/users/${user.id}`, {
+        isActive: !user.isActive,
+      })
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, ...updated } : u)))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update account status')
+    } finally {
+      setStatusUpdatingId(null)
     }
   }
 
@@ -105,6 +124,11 @@ export default function AdminUsersPage() {
                               <Shield className="w-3 h-3" /> Admin
                             </span>
                           )}
+                          {!user.isActive && (
+                            <span className="text-xs font-medium text-red-300 bg-red-400/10 rounded-full px-2 py-0.5 shrink-0">
+                              Deactivated
+                            </span>
+                          )}
                           {isCurrentUser && (
                             <span className="text-xs text-slate-500 shrink-0">(you)</span>
                           )}
@@ -134,6 +158,21 @@ export default function AdminUsersPage() {
                           <Shield className="w-3.5 h-3.5" />
                         )}
                         {user.role === 'admin' ? 'Demote' : 'Make Admin'}
+                      </button>
+                      <button
+                        onClick={() => toggleActive(user)}
+                        disabled={statusUpdatingId === user.id || isCurrentUser}
+                        className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed border-slate-600 text-slate-300 hover:border-red-400 hover:text-red-300"
+                        title={isCurrentUser ? "Can't change your own status" : user.isActive ? 'Deactivate account' : 'Reactivate account'}
+                      >
+                        {statusUpdatingId === user.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : user.isActive ? (
+                          <UserX className="w-3.5 h-3.5" />
+                        ) : (
+                          <UserCheck className="w-3.5 h-3.5" />
+                        )}
+                        {user.isActive ? 'Deactivate' : 'Reactivate'}
                       </button>
                       <button
                         onClick={() => deleteUser(user)}
