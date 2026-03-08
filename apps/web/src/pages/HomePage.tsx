@@ -3,12 +3,14 @@ import { Search, MapPin, TrendingUp, Sparkles, Loader2 } from 'lucide-react'
 import PlaceCard, { type Place } from '../components/ui/PlaceCard'
 import { api } from '../lib/api'
 import { useGeolocation } from '../hooks/useGeolocation'
+import { useAuth } from '../context/AuthContext'
 
 const CUISINE_TAGS = [
   'All', 'Italian', 'Japanese', 'Burgers', 'Vegan', 'Indian', 'Brunch', 'Cocktail Bars', 'Fine Dining', 'British',
 ]
-const DISCOVER_CACHE_KEY = 'bm_discover_cache'
-const FOLLOWING_PICKS_CACHE_KEY = 'bm_following_picks'
+const DISCOVER_CACHE_KEY_PREFIX = 'bm_discover_cache'
+const FOLLOWING_PICKS_CACHE_KEY_PREFIX = 'bm_following_picks'
+const DISCOVER_STATE_KEY_PREFIX = 'bm_discover_state'
 
 type FeedItem = {
   type: 'review' | 'visit'
@@ -29,9 +31,14 @@ function pickUnique(places: Place[], excluded: Set<string>, limit: number): Plac
 }
 
 export default function HomePage() {
+  const { user } = useAuth()
+  const discoverCacheKey = `${DISCOVER_CACHE_KEY_PREFIX}:${user?.id ?? 'anon'}`
+  const followingCacheKey = `${FOLLOWING_PICKS_CACHE_KEY_PREFIX}:${user?.id ?? 'anon'}`
+  const discoverStateKey = `${DISCOVER_STATE_KEY_PREFIX}:${user?.id ?? 'anon'}`
+
   const [places, setPlaces] = useState<Place[]>(() => {
     try {
-      const raw = sessionStorage.getItem(DISCOVER_CACHE_KEY)
+      const raw = sessionStorage.getItem(discoverCacheKey)
       if (!raw) return []
       const parsed = JSON.parse(raw) as Place[]
       return Array.isArray(parsed) ? parsed : []
@@ -46,7 +53,7 @@ export default function HomePage() {
   const [activeTag, setActiveTag] = useState('All')
   const [followingFeed, setFollowingFeed] = useState<FeedItem[]>(() => {
     try {
-      const raw = sessionStorage.getItem(FOLLOWING_PICKS_CACHE_KEY)
+      const raw = sessionStorage.getItem(followingCacheKey)
       if (!raw) return []
       const parsed = JSON.parse(raw) as FeedItem[]
       return Array.isArray(parsed) ? parsed : []
@@ -56,6 +63,64 @@ export default function HomePage() {
   })
   const { coords, permission } = useGeolocation()
   const cacheRef = useRef(new Map<string, Place[]>())
+  const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(discoverCacheKey)
+      const parsed = raw ? (JSON.parse(raw) as Place[]) : []
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setPlaces(parsed)
+        setLoading(false)
+      } else {
+        setPlaces([])
+        setLoading(true)
+      }
+    } catch {
+      setPlaces([])
+      setLoading(true)
+    }
+  }, [discoverCacheKey])
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(followingCacheKey)
+      const parsed = raw ? (JSON.parse(raw) as FeedItem[]) : []
+      setFollowingFeed(Array.isArray(parsed) ? parsed : [])
+    } catch {
+      setFollowingFeed([])
+    }
+  }, [followingCacheKey])
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(discoverStateKey)
+      if (!raw) {
+        setSearchQuery('')
+        setDebouncedSearch('')
+        setActiveTag('All')
+        return
+      }
+      const parsed = JSON.parse(raw) as { searchQuery?: string; activeTag?: string }
+      const nextSearch = typeof parsed.searchQuery === 'string' ? parsed.searchQuery : ''
+      const nextTag = typeof parsed.activeTag === 'string' ? parsed.activeTag : 'All'
+      setSearchQuery(nextSearch)
+      setDebouncedSearch(nextSearch.trim())
+      setActiveTag(nextTag)
+    } catch {
+      setSearchQuery('')
+      setDebouncedSearch('')
+      setActiveTag('All')
+    }
+  }, [discoverStateKey])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(discoverStateKey, JSON.stringify({ searchQuery, activeTag }))
+    } catch {
+      // ignore storage errors
+    }
+  }, [activeTag, discoverStateKey, searchQuery])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350)
@@ -78,6 +143,7 @@ export default function HomePage() {
   }, [activeTag, coords, debouncedSearch])
 
   const fetchPlaces = useCallback(async (url: string) => {
+    const requestId = ++requestIdRef.current
     const cached = cacheRef.current.get(url)
     if (cached) {
       setPlaces(cached)
@@ -89,16 +155,19 @@ export default function HomePage() {
     }
     try {
       const data = await api.get<Place[]>(url)
+      if (requestId !== requestIdRef.current) return
       cacheRef.current.set(url, data)
       setPlaces(data)
-      sessionStorage.setItem(DISCOVER_CACHE_KEY, JSON.stringify(data))
+      sessionStorage.setItem(discoverCacheKey, JSON.stringify(data))
     } catch {
+      if (requestId !== requestIdRef.current) return
       if (!cached) setPlaces([])
     } finally {
+      if (requestId !== requestIdRef.current) return
       setLoading(false)
       setRefreshing(false)
     }
-  }, [])
+  }, [discoverCacheKey])
 
   useEffect(() => {
     void fetchPlaces(requestUrl)
@@ -109,12 +178,12 @@ export default function HomePage() {
       .get<{ data: FeedItem[] }>('/api/users/feed')
       .then((res) => {
         setFollowingFeed(res.data)
-        sessionStorage.setItem(FOLLOWING_PICKS_CACHE_KEY, JSON.stringify(res.data))
+        sessionStorage.setItem(followingCacheKey, JSON.stringify(res.data))
       })
       .catch(() => {
         setFollowingFeed((prev) => prev)
       })
-  }, [])
+  }, [followingCacheKey])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()

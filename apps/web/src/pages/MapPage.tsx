@@ -6,6 +6,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../lib/api'
 import { useGeolocation } from '../hooks/useGeolocation'
+import { useAuth } from '../context/AuthContext'
 
 type MapPlace = {
   id: string
@@ -19,7 +20,7 @@ type MapPlace = {
 }
 
 const DEFAULT_CENTER: [number, number] = [43.6532, -79.3832]
-const MAP_STATE_KEY = 'bm_map_state'
+const MAP_STATE_KEY_PREFIX = 'bm_map_state'
 const mapResultsCache = new Map<string, MapPlace[]>()
 
 function kmToMiles(km: number): number {
@@ -89,9 +90,11 @@ function ViewportController({
 }
 
 export default function MapPage() {
+  const { user } = useAuth()
+  const mapStateKey = `${MAP_STATE_KEY_PREFIX}:${user?.id ?? 'anon'}`
   const initialMapState = (() => {
     try {
-      const raw = sessionStorage.getItem(MAP_STATE_KEY)
+      const raw = sessionStorage.getItem(mapStateKey)
       if (!raw) return null
       return JSON.parse(raw) as { search?: string; radiusKm?: number; activeCuisine?: string }
     } catch {
@@ -116,6 +119,26 @@ export default function MapPage() {
   const prevRadiusRef = useRef(2)
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(mapStateKey)
+      if (!raw) {
+        setSearch('')
+        setRadiusKm(2)
+        setActiveCuisine('All')
+        return
+      }
+      const parsed = JSON.parse(raw) as { search?: string; radiusKm?: number; activeCuisine?: string }
+      setSearch(typeof parsed.search === 'string' ? parsed.search : '')
+      setRadiusKm(typeof parsed.radiusKm === 'number' ? parsed.radiusKm : 2)
+      setActiveCuisine(typeof parsed.activeCuisine === 'string' ? parsed.activeCuisine : 'All')
+    } catch {
+      setSearch('')
+      setRadiusKm(2)
+      setActiveCuisine('All')
+    }
+  }, [mapStateKey])
+
+  useEffect(() => {
     if (requestedLocationRef.current) return
     requestedLocationRef.current = true
     requestLocation()
@@ -128,13 +151,13 @@ export default function MapPage() {
   useEffect(() => {
     try {
       sessionStorage.setItem(
-        MAP_STATE_KEY,
+        mapStateKey,
         JSON.stringify({ search, radiusKm, activeCuisine }),
       )
     } catch {
       // ignore session storage issues
     }
-  }, [activeCuisine, radiusKm, search])
+  }, [activeCuisine, mapStateKey, radiusKm, search])
 
   useEffect(() => {
     placesRef.current = places
@@ -159,12 +182,13 @@ export default function MapPage() {
     const endpoint = coords ? '/api/places/nearby' : '/api/places'
     return `${endpoint}?${params}`
   }, [coords, debouncedSearch, locationSettled, radiusKm])
+  const requestCacheKey = `${user?.id ?? 'anon'}:${requestUrl ?? ''}`
 
   useEffect(() => {
     if (!requestUrl) return
     const fetchPlaces = async () => {
       const requestId = ++requestIdRef.current
-      const cached = mapResultsCache.get(requestUrl)
+      const cached = mapResultsCache.get(requestCacheKey)
       if (cached) {
         setPlaces(cached)
         setLoading(false)
@@ -196,7 +220,7 @@ export default function MapPage() {
           nextData = nextData.slice(0, getResultLimit(radiusKm))
         }
 
-        mapResultsCache.set(requestUrl, nextData)
+        mapResultsCache.set(requestCacheKey, nextData)
         setPlaces(nextData)
         prevSearchRef.current = currentSearch
         prevRadiusRef.current = radiusKm
@@ -212,7 +236,7 @@ export default function MapPage() {
       }
     }
     void fetchPlaces()
-  }, [requestUrl])
+  }, [requestCacheKey, requestUrl])
 
   const cuisines = useMemo(() => {
     const values = new Set<string>()
