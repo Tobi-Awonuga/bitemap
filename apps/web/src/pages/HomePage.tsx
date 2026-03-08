@@ -8,6 +8,14 @@ const CUISINE_TAGS = [
   'All', 'Italian', 'Japanese', 'Burgers', 'Vegan', 'Indian', 'Brunch', 'Cocktail Bars', 'Fine Dining', 'British',
 ]
 const DISCOVER_CACHE_KEY = 'bm_discover_cache'
+const FOLLOWING_PICKS_CACHE_KEY = 'bm_following_picks'
+
+type FeedItem = {
+  type: 'review' | 'visit'
+  id: string
+  createdAt: string
+  place: Place
+}
 
 function pickUnique(places: Place[], excluded: Set<string>, limit: number): Place[] {
   const selected: Place[] = []
@@ -36,6 +44,16 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeTag, setActiveTag] = useState('All')
+  const [followingFeed, setFollowingFeed] = useState<FeedItem[]>(() => {
+    try {
+      const raw = sessionStorage.getItem(FOLLOWING_PICKS_CACHE_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw) as FeedItem[]
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
   const { coords, permission } = useGeolocation()
   const cacheRef = useRef(new Map<string, Place[]>())
 
@@ -85,6 +103,18 @@ export default function HomePage() {
     void fetchPlaces(requestUrl)
   }, [fetchPlaces, requestUrl])
 
+  useEffect(() => {
+    api
+      .get<{ data: FeedItem[] }>('/api/users/feed')
+      .then((res) => {
+        setFollowingFeed(res.data)
+        sessionStorage.setItem(FOLLOWING_PICKS_CACHE_KEY, JSON.stringify(res.data))
+      })
+      .catch(() => {
+        setFollowingFeed((prev) => prev)
+      })
+  }, [])
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     setDebouncedSearch(searchQuery.trim())
@@ -113,6 +143,18 @@ export default function HomePage() {
     )
     return { nearYou, trending, topRated }
   }, [places])
+
+  const followingPicks = useMemo(() => {
+    const seen = new Set<string>()
+    return followingFeed
+      .map((item) => item.place)
+      .filter((place) => {
+        if (seen.has(place.id)) return false
+        seen.add(place.id)
+        return true
+      })
+      .slice(0, 6)
+  }, [followingFeed])
 
   const locationLabel = useMemo(() => {
     if (coords) return 'Near you'
@@ -237,6 +279,20 @@ export default function HomePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {curated.topRated.map((place) => (
                   <PlaceCard key={place.id} place={place} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Following picks */}
+          {followingPicks.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-slate-900">From People You Follow</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {followingPicks.map((place) => (
+                  <PlaceCard key={`follow-${place.id}`} place={place} />
                 ))}
               </div>
             </section>
