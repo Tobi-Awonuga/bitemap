@@ -6,6 +6,7 @@ import {
   doublePrecision,
   integer,
   boolean,
+  jsonb,
   uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core'
@@ -139,6 +140,23 @@ export const follows = pgTable('follows', {
   followingIdx: index('follows_following_id_idx').on(table.followingId),
 }))
 
+export const notifications = pgTable('notifications', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+  type: text('type').notNull(),
+  title: text('title').notNull(),
+  body: text('body'),
+  link: text('link'),
+  meta: jsonb('meta').$type<Record<string, unknown> | null>(),
+  isRead: boolean('is_read').notNull().default(false),
+  readAt: timestamp('read_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  userCreatedIdx: index('notifications_user_created_idx').on(table.userId, table.createdAt),
+  userReadIdx: index('notifications_user_read_idx').on(table.userId, table.isRead),
+}))
+
 // ─── Relations ────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -150,6 +168,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   followers: many(follows, { relationName: 'following' }),
   following: many(follows, { relationName: 'follower' }),
   passwordResets: many(passwordResets),
+  notifications: many(notifications),
+  actorNotifications: many(notifications, { relationName: 'notificationActor' }),
 }))
 
 export const placesRelations = relations(places, ({ many }) => ({
@@ -206,6 +226,15 @@ export const followsRelations = relations(follows, ({ one }) => ({
     fields: [follows.followingId],
     references: [users.id],
     relationName: 'following',
+  }),
+}))
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, { fields: [notifications.userId], references: [users.id] }),
+  actor: one(users, {
+    fields: [notifications.actorUserId],
+    references: [users.id],
+    relationName: 'notificationActor',
   }),
 }))
 

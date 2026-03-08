@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../../db'
 import { follows, reviews, saves, users, visits } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
+import { createNotification } from '../notifications/notifications.service'
 
 export const usersRouter = Router()
 const GOOGLE_PHOTO_PREFIX = 'gphoto:'
@@ -219,7 +220,30 @@ usersRouter.post('/:id/follow', requireAuth, async (req: AuthRequest, res) => {
   }
 
   try {
-    await db.insert(follows).values({ followerId: req.user!.id, followingId: targetUserId })
+    const [created] = await db
+      .insert(follows)
+      .values({ followerId: req.user!.id, followingId: targetUserId })
+      .onConflictDoNothing()
+      .returning({ id: follows.id })
+
+    if (created) {
+      const actor = await db.query.users.findFirst({
+        where: eq(users.id, req.user!.id),
+        columns: { displayName: true },
+      })
+      try {
+        await createNotification({
+          userId: targetUserId,
+          actorUserId: req.user!.id,
+          type: 'follow',
+          title: 'New follower',
+          body: `${actor?.displayName ?? 'Someone'} started following you`,
+          link: `/users/${req.user!.id}`,
+        })
+      } catch {
+        // non-blocking side effect
+      }
+    }
   } catch {
     // Ignore conflicts for idempotent behavior
   }

@@ -57,6 +57,13 @@
       "when": 1772935000000,
       "tag": "0007_flat_circle",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1772939000000,
+      "tag": "0008_muddy_rocket",
+      "breakpoints": true
     }
   ]
 }

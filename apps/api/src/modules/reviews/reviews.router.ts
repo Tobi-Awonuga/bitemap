@@ -5,6 +5,7 @@ import { db } from '../../db'
 import { reviewHelpfulVotes, reviewReports, reviews, visits } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
 import { reviewSchema, reviewUpdateSchema } from '@bitemap/shared'
+import { createNotification } from '../notifications/notifications.service'
 
 export const reviewsRouter = Router()
 const reviewReportSchema = z.object({
@@ -115,7 +116,7 @@ reviewsRouter.post('/:id/helpful', requireAuth, async (req: AuthRequest, res) =>
 
   const review = await db.query.reviews.findFirst({
     where: eq(reviews.id, reviewId),
-    columns: { id: true, userId: true },
+    columns: { id: true, userId: true, placeId: true },
   })
   if (!review) {
     res.status(404).json({ error: 'Review not found' })
@@ -131,6 +132,22 @@ reviewsRouter.post('/:id/helpful', requireAuth, async (req: AuthRequest, res) =>
     .values({ reviewId, userId: req.user!.id })
     .onConflictDoNothing()
     .returning({ id: reviewHelpfulVotes.id })
+
+  if (vote) {
+    try {
+      await createNotification({
+        userId: review.userId,
+        actorUserId: req.user!.id,
+        type: 'review_helpful',
+        title: 'Someone found your review helpful',
+        body: 'Your review got a helpful vote',
+        link: `/places/${review.placeId}`,
+        meta: { reviewId: review.id },
+      })
+    } catch {
+      // do not fail helpful action if notification creation fails
+    }
+  }
 
   res.status(vote ? 201 : 200).json({ success: true })
 })

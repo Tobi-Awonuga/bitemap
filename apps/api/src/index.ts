@@ -14,6 +14,7 @@ import { savesRouter } from './modules/saves/saves.router'
 import { visitsRouter } from './modules/visits/visits.router'
 import { tagsRouter } from './modules/tags/tags.router'
 import { adminRouter } from './modules/admin/admin.router'
+import { notificationsRouter } from './modules/notifications/notifications.router'
 import * as schema from './db/schema'
 
 const app = express()
@@ -49,6 +50,7 @@ app.use('/api/saves', savesRouter)
 app.use('/api/visits', visitsRouter)
 app.use('/api/tags', tagsRouter)
 app.use('/api/admin', adminRouter)
+app.use('/api/notifications', notificationsRouter)
 
 app.use('/api/*', (_req, res) => {
   res.status(404).json({ error: 'Route not found' })
