@@ -19,6 +19,8 @@ type MapPlace = {
 }
 
 const DEFAULT_CENTER: [number, number] = [43.6532, -79.3832]
+const MAP_STATE_KEY = 'bm_map_state'
+const mapResultsCache = new Map<string, MapPlace[]>()
 
 function kmToMiles(km: number): number {
   return km * 0.621371
@@ -87,18 +89,26 @@ function ViewportController({
 }
 
 export default function MapPage() {
+  const initialMapState = (() => {
+    try {
+      const raw = sessionStorage.getItem(MAP_STATE_KEY)
+      if (!raw) return null
+      return JSON.parse(raw) as { search?: string; radiusKm?: number; activeCuisine?: string }
+    } catch {
+      return null
+    }
+  })()
   const [places, setPlaces] = useState<MapPlace[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialMapState?.search ?? '')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const [radiusKm, setRadiusKm] = useState(2)
-  const [activeCuisine, setActiveCuisine] = useState('All')
+  const [radiusKm, setRadiusKm] = useState(initialMapState?.radiusKm ?? 2)
+  const [activeCuisine, setActiveCuisine] = useState(initialMapState?.activeCuisine ?? 'All')
   const { coords, permission, error: geoError, requestLocation } = useGeolocation()
   const [locationSettled, setLocationSettled] = useState(false)
-  const cacheRef = useRef(new Map<string, MapPlace[]>())
   const requestedLocationRef = useRef(false)
   const requestIdRef = useRef(0)
   const placesRef = useRef<MapPlace[]>([])
@@ -114,6 +124,17 @@ export default function MapPage() {
   useEffect(() => {
     if (coords || permission === 'denied') setLocationSettled(true)
   }, [coords, permission])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        MAP_STATE_KEY,
+        JSON.stringify({ search, radiusKm, activeCuisine }),
+      )
+    } catch {
+      // ignore session storage issues
+    }
+  }, [activeCuisine, radiusKm, search])
 
   useEffect(() => {
     placesRef.current = places
@@ -143,7 +164,7 @@ export default function MapPage() {
     if (!requestUrl) return
     const fetchPlaces = async () => {
       const requestId = ++requestIdRef.current
-      const cached = cacheRef.current.get(requestUrl)
+      const cached = mapResultsCache.get(requestUrl)
       if (cached) {
         setPlaces(cached)
         setLoading(false)
@@ -175,7 +196,7 @@ export default function MapPage() {
           nextData = nextData.slice(0, getResultLimit(radiusKm))
         }
 
-        cacheRef.current.set(requestUrl, nextData)
+        mapResultsCache.set(requestUrl, nextData)
         setPlaces(nextData)
         prevSearchRef.current = currentSearch
         prevRadiusRef.current = radiusKm
@@ -335,6 +356,7 @@ export default function MapPage() {
               <Link
                 key={place.id}
                 to={`/places/${place.id}`}
+                state={{ from: '/map' }}
                 className="flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors group"
               >
                 <div
@@ -409,7 +431,7 @@ export default function MapPage() {
                 <div className="space-y-1">
                   <p className="font-semibold text-slate-900">{place.name}</p>
                   <p className="text-xs text-slate-500">{place.address}</p>
-                  <Link to={`/places/${place.id}`} className="text-xs text-orange-600 font-medium">
+                  <Link to={`/places/${place.id}`} state={{ from: '/map' }} className="text-xs text-orange-600 font-medium">
                     Open details
                   </Link>
                 </div>

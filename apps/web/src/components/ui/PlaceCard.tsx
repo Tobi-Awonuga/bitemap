@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Bookmark, Star, MapPin } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { api } from '../../lib/api'
 
 export type Place = {
@@ -38,6 +38,7 @@ type Props = {
 }
 
 export default function PlaceCard({ place, showVisitedBadge, visitedDate, onSaveChange }: Props) {
+  const location = useLocation()
   const [saved, setSaved] = useState(place.isSaved ?? false)
   const [toggling, setToggling] = useState(false)
 
@@ -69,6 +70,7 @@ export default function PlaceCard({ place, showVisitedBadge, visitedDate, onSave
   return (
     <Link
       to={`/places/${place.id}`}
+      state={{ from: location.pathname }}
       className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col"
     >
       {/* Image / hero area */}

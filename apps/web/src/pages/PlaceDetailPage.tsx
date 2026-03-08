@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2,
 } from 'lucide-react'
@@ -48,6 +48,7 @@ function formatDate(dateStr: string): string {
 export default function PlaceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const [place, setPlace] = useState<PlaceDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -177,7 +178,14 @@ export default function PlaceDetailPage() {
 
   const gradient = gradientFor(place.id)
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.latitude},${place.longitude}`
+  const fromPath = typeof location.state === 'object' && location.state !== null && 'from' in location.state
+    ? String((location.state as { from?: string }).from ?? '')
+    : ''
   const handleBack = () => {
+    if (fromPath === '/map' || fromPath === '/discover') {
+      navigate(fromPath)
+      return
+    }
     if (window.history.length > 1) {
       navigate(-1)
       return
