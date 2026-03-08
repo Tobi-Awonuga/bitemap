@@ -35,9 +35,10 @@ type Props = {
   showVisitedBadge?: boolean
   visitedDate?: string
   onSaveChange?: (placeId: string, saved: boolean) => void
+  recommendationReason?: string
 }
 
-export default function PlaceCard({ place, showVisitedBadge, visitedDate, onSaveChange }: Props) {
+export default function PlaceCard({ place, showVisitedBadge, visitedDate, onSaveChange, recommendationReason }: Props) {
   const location = useLocation()
   const [saved, setSaved] = useState(place.isSaved ?? false)
   const [toggling, setToggling] = useState(false)
@@ -139,6 +140,10 @@ export default function PlaceCard({ place, showVisitedBadge, visitedDate, onSave
             ? `${place.reviewCount.toLocaleString()} review${place.reviewCount !== 1 ? 's' : ''}`
             : 'No reviews yet'}
         </p>
+
+        {recommendationReason && (
+          <p className="text-xs text-orange-500">{recommendationReason}</p>
+        )}
 
         {visitedDate && (
           <p className="text-xs text-slate-400 border-t border-slate-100 pt-2 mt-auto">

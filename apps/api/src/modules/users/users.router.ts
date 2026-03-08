@@ -114,6 +114,41 @@ function tasteMatchPercent(a: TasteVector, b: TasteVector): number {
   return Math.round((dot / (Math.sqrt(magA) * Math.sqrt(magB))) * 100)
 }
 
+type PlaceStatsRow = {
+  id: string
+  name: string
+  cuisine: string | null
+  address: string
+  imageUrl: string | null
+  avgRating: number
+  reviewCount: number
+}
+
+async function getPlaceStats(limit = 300): Promise<PlaceStatsRow[]> {
+  const rows = await db
+    .select({
+      id: places.id,
+      name: places.name,
+      cuisine: places.cuisine,
+      address: places.address,
+      imageUrl: places.imageUrl,
+      avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`.as('avg_rating'),
+      reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
+    })
+    .from(places)
+    .leftJoin(reviews, eq(reviews.placeId, places.id))
+    .groupBy(places.id)
+    .orderBy(desc(places.createdAt))
+    .limit(limit)
+
+  return rows.map((row) => ({
+    ...row,
+    imageUrl: serializeImageUrl(row.id, row.imageUrl),
+    avgRating: Number(row.avgRating),
+    reviewCount: Number(row.reviewCount),
+  }))
+}
+
 // GET /api/users/me
 usersRouter.get('/me', requireAuth, async (req: AuthRequest, res) => {
   const user = await db.query.users.findFirst({
@@ -226,6 +261,89 @@ usersRouter.get('/feed', requireAuth, async (req: AuthRequest, res) => {
     .slice(0, 40)
 
   res.json({ data: merged })
+})
+
+// GET /api/users/recommendations?limit=6
+usersRouter.get('/recommendations', requireAuth, async (req: AuthRequest, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '6'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 12) : 6
+
+  const [statsRows, meTaste, followingRows] = await Promise.all([
+    getPlaceStats(400),
+    getTasteVector(req.user!.id),
+    db.query.follows.findMany({
+      where: eq(follows.followerId, req.user!.id),
+      columns: { followingId: true },
+    }),
+  ])
+  const statsById = new Map(statsRows.map((row) => [row.id, row]))
+  const taken = new Set<string>()
+
+  const topCuisines = topTasteCuisines(meTaste, 3).map((row) => row.cuisine)
+
+  const forYou = statsRows
+    .filter((row) => row.cuisine && topCuisines.some((cuisine) => row.cuisine?.toLowerCase() === cuisine))
+    .sort((a, b) => b.avgRating - a.avgRating || b.reviewCount - a.reviewCount)
+    .slice(0, limit)
+    .map((row) => {
+      taken.add(row.id)
+      return {
+        ...row,
+        reason: `Because you like ${row.cuisine}`,
+      }
+    })
+
+  const followingIds = followingRows.map((row) => row.followingId)
+  const friendsLovedRows = followingIds.length
+    ? await db
+        .select({
+          placeId: reviews.placeId,
+          friendReviewCount: sql<number>`COUNT(*)`.as('friend_review_count'),
+        })
+        .from(reviews)
+        .where(inArray(reviews.userId, followingIds))
+        .groupBy(reviews.placeId)
+        .orderBy(desc(sql`COUNT(*)`))
+        .limit(limit * 4)
+    : []
+
+  const friendsLoved = friendsLovedRows
+    .map((row) => {
+      const place = statsById.get(row.placeId)
+      if (!place || taken.has(place.id)) return null
+      return {
+        ...place,
+        reason: `Loved by ${Number(row.friendReviewCount)} people you follow`,
+      }
+    })
+    .filter((row): row is NonNullable<typeof row> => !!row)
+    .slice(0, limit)
+  friendsLoved.forEach((row) => taken.add(row.id))
+
+  const trendingRows = await db
+    .select({
+      placeId: reviews.placeId,
+      recentReviewCount: sql<number>`COUNT(*)`.as('recent_review_count'),
+    })
+    .from(reviews)
+    .where(sql`${reviews.createdAt} > now() - interval '7 days'`)
+    .groupBy(reviews.placeId)
+    .orderBy(desc(sql`COUNT(*)`))
+    .limit(limit * 5)
+
+  const trendingNow = trendingRows
+    .map((row) => {
+      const place = statsById.get(row.placeId)
+      if (!place || taken.has(place.id)) return null
+      return {
+        ...place,
+        reason: `${Number(row.recentReviewCount)} new reviews this week`,
+      }
+    })
+    .filter((row): row is NonNullable<typeof row> => !!row)
+    .slice(0, limit)
+
+  res.json({ data: { forYou, friendsLoved, trendingNow } })
 })
 
 // GET /api/users/suggestions?limit=6 - suggested users to follow

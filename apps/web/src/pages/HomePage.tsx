@@ -28,6 +28,18 @@ type SuggestedUser = {
   followerCount: number
 }
 
+type RecommendedPlace = Place & { reason?: string }
+type Recommendations = {
+  forYou: RecommendedPlace[]
+  friendsLoved: RecommendedPlace[]
+  trendingNow: RecommendedPlace[]
+}
+
+function recommendationReasonFor(place: Place | RecommendedPlace): string | undefined {
+  const reason = (place as RecommendedPlace).reason
+  return typeof reason === 'string' ? reason : undefined
+}
+
 function pickUnique(places: Place[], excluded: Set<string>, limit: number): Place[] {
   const selected: Place[] = []
   for (const place of places) {
@@ -73,6 +85,11 @@ export default function HomePage() {
   const [suggestions, setSuggestions] = useState<SuggestedUser[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const [followPendingId, setFollowPendingId] = useState<string | null>(null)
+  const [recommendations, setRecommendations] = useState<Recommendations>({
+    forYou: [],
+    friendsLoved: [],
+    trendingNow: [],
+  })
   const { coords, permission } = useGeolocation()
   const cacheRef = useRef(new Map<string, Place[]>())
   const requestIdRef = useRef(0)
@@ -198,6 +215,13 @@ export default function HomePage() {
   }, [followingCacheKey])
 
   useEffect(() => {
+    api
+      .get<{ data: Recommendations }>('/api/users/recommendations?limit=6')
+      .then((res) => setRecommendations(res.data))
+      .catch(() => setRecommendations({ forYou: [], friendsLoved: [], trendingNow: [] }))
+  }, [user?.id])
+
+  useEffect(() => {
     setSuggestionsLoading(true)
     api
       .get<{ data: SuggestedUser[] }>('/api/users/suggestions?limit=6')
@@ -260,6 +284,10 @@ export default function HomePage() {
       })
       .slice(0, 6)
   }, [followingFeed])
+
+  const forYouPlaces = recommendations.forYou.length > 0 ? recommendations.forYou : curated.topRated
+  const trendingPlaces = recommendations.trendingNow.length > 0 ? recommendations.trendingNow : curated.trending
+  const friendsLovedPlaces = recommendations.friendsLoved.length > 0 ? recommendations.friendsLoved : followingPicks
 
   const locationLabel = useMemo(() => {
     if (coords) return 'Near you'
@@ -362,42 +390,42 @@ export default function HomePage() {
           </section>
 
           {/* Trending */}
-          {curated.trending.length > 0 && (
+          {trendingPlaces.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-lg font-bold text-slate-900">Trending Now</h2>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {curated.trending.map((place) => (
-                  <PlaceCard key={place.id} place={place} />
+                {trendingPlaces.map((place) => (
+                  <PlaceCard key={place.id} place={place} recommendationReason={recommendationReasonFor(place)} />
                 ))}
               </div>
             </section>
           )}
 
           {/* Top rated */}
-          {curated.topRated.length > 0 && (
+          {forYouPlaces.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-slate-900">Top Rated</h2>
+                <h2 className="text-lg font-bold text-slate-900">For You</h2>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {curated.topRated.map((place) => (
-                  <PlaceCard key={place.id} place={place} />
+                {forYouPlaces.map((place) => (
+                  <PlaceCard key={place.id} place={place} recommendationReason={recommendationReasonFor(place)} />
                 ))}
               </div>
             </section>
           )}
 
           {/* Following picks */}
-          {followingPicks.length > 0 && (
+          {friendsLovedPlaces.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-lg font-bold text-slate-900">From People You Follow</h2>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {followingPicks.map((place) => (
-                  <PlaceCard key={`follow-${place.id}`} place={place} />
+                {friendsLovedPlaces.map((place) => (
+                  <PlaceCard key={`follow-${place.id}`} place={place} recommendationReason={recommendationReasonFor(place)} />
                 ))}
               </div>
             </section>
