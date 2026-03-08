@@ -78,6 +78,16 @@ const NON_FOOD_TYPES = new Set([
   'lodging',
 ])
 
+const CUISINE_TYPE_LABELS: Record<string, string> = {
+  cafe: 'Cafe',
+  coffee_shop: 'Cafe',
+  bakery: 'Bakery',
+  bar: 'Bar',
+  meal_takeaway: 'Fast Casual',
+  meal_delivery: 'Delivery',
+  food: 'Food',
+}
+
 const nearbyCache = new Map<string, NearbyCacheEntry>()
 const nearbyRateLimit = new Map<string, NearbyRateLimitEntry>()
 const PLACES_PROVIDER = (process.env.PLACES_PROVIDER ?? 'local').toLowerCase()
@@ -138,15 +148,23 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
 
 function inferCuisine(types: string[] | undefined): string | null {
   if (!types || types.length === 0) return null
-  const candidates = types
+  const restaurantCuisine = types
     .filter((type) => type.endsWith('_restaurant'))
     .map((type) => type.replace(/_restaurant$/, '').replace(/_/g, ' '))
     .find((type) => type !== 'restaurant')
-  if (!candidates) return null
-  return candidates
-    .split(' ')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
+  if (restaurantCuisine) {
+    return restaurantCuisine
+      .split(' ')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ')
+  }
+
+  for (const type of types) {
+    const mapped = CUISINE_TYPE_LABELS[type]
+    if (mapped) return mapped
+  }
+
+  return null
 }
 
 function isFoodPlace(types: string[] | undefined): boolean {
