@@ -55,6 +55,29 @@ type GooglePlace = {
   photos?: Array<{ name?: string }>
 }
 
+const FOOD_PLACE_TYPES = new Set([
+  'restaurant',
+  'cafe',
+  'bar',
+  'bakery',
+  'meal_takeaway',
+  'meal_delivery',
+  'food',
+])
+
+const NON_FOOD_TYPES = new Set([
+  'school',
+  'veterinary_care',
+  'pet_store',
+  'gym',
+  'hospital',
+  'doctor',
+  'shopping_mall',
+  'car_dealer',
+  'real_estate_agency',
+  'lodging',
+])
+
 const nearbyCache = new Map<string, NearbyCacheEntry>()
 const nearbyRateLimit = new Map<string, NearbyRateLimitEntry>()
 const PLACES_PROVIDER = (process.env.PLACES_PROVIDER ?? 'local').toLowerCase()
@@ -116,13 +139,21 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
 function inferCuisine(types: string[] | undefined): string | null {
   if (!types || types.length === 0) return null
   const candidates = types
+    .filter((type) => type.endsWith('_restaurant'))
     .map((type) => type.replace(/_restaurant$/, '').replace(/_/g, ' '))
-    .find((type) => type !== 'restaurant' && !type.includes('point of interest'))
+    .find((type) => type !== 'restaurant')
   if (!candidates) return null
   return candidates
     .split(' ')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
+}
+
+function isFoodPlace(types: string[] | undefined): boolean {
+  if (!types || types.length === 0) return false
+  const includesFoodType = types.some((type) => FOOD_PLACE_TYPES.has(type))
+  const includesBlockedType = types.some((type) => NON_FOOD_TYPES.has(type))
+  return includesFoodType && !includesBlockedType
 }
 
 function serializeImageUrl(placeId: string, imageUrl: string | null): string | null {
@@ -240,7 +271,7 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
         'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.types,places.photos',
     },
     body: JSON.stringify({
-      textQuery: parsed.q ?? 'restaurants',
+      textQuery: parsed.q ? `${parsed.q} restaurants` : 'restaurants',
       pageSize: parsed.limit,
       locationBias: {
         circle: {
@@ -263,7 +294,8 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
       !!place.displayName?.text &&
       !!place.formattedAddress &&
       Number.isFinite(place.location?.latitude) &&
-      Number.isFinite(place.location?.longitude),
+      Number.isFinite(place.location?.longitude) &&
+      isFoodPlace(place.types),
   )
 
   if (providerPlaces.length === 0) return []
