@@ -56,6 +56,34 @@ export const reviews = pgTable('reviews', {
   userIdx: index('reviews_user_id_idx').on(table.userId),
 }))
 
+export const reviewHelpfulVotes = pgTable('review_helpful_votes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  reviewId: uuid('review_id').notNull().references(() => reviews.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  reviewUserUnique: uniqueIndex('review_helpful_votes_review_user_unique').on(table.reviewId, table.userId),
+  reviewIdx: index('review_helpful_votes_review_id_idx').on(table.reviewId),
+  userIdx: index('review_helpful_votes_user_id_idx').on(table.userId),
+}))
+
+export const reviewReports = pgTable('review_reports', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  reviewId: uuid('review_id').notNull().references(() => reviews.id, { onDelete: 'cascade' }),
+  reporterUserId: uuid('reporter_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  reason: text('reason').notNull(),
+  details: text('details'),
+  status: text('status', { enum: ['open', 'resolved', 'dismissed'] }).notNull().default('open'),
+  resolvedByUserId: uuid('resolved_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  resolvedAt: timestamp('resolved_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  reportUnique: uniqueIndex('review_reports_review_reporter_unique').on(table.reviewId, table.reporterUserId),
+  reviewIdx: index('review_reports_review_id_idx').on(table.reviewId),
+  reporterIdx: index('review_reports_reporter_user_id_idx').on(table.reporterUserId),
+  statusIdx: index('review_reports_status_idx').on(table.status),
+}))
+
 export const saves = pgTable('saves', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -117,6 +145,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   saves: many(saves),
   visits: many(visits),
   reviews: many(reviews),
+  reviewHelpfulVotes: many(reviewHelpfulVotes),
+  reviewReports: many(reviewReports),
   followers: many(follows, { relationName: 'following' }),
   following: many(follows, { relationName: 'follower' }),
   passwordResets: many(passwordResets),
@@ -133,6 +163,17 @@ export const reviewsRelations = relations(reviews, ({ one }) => ({
   user: one(users, { fields: [reviews.userId], references: [users.id] }),
   place: one(places, { fields: [reviews.placeId], references: [places.id] }),
   visit: one(visits, { fields: [reviews.visitId], references: [visits.id] }),
+}))
+
+export const reviewHelpfulVotesRelations = relations(reviewHelpfulVotes, ({ one }) => ({
+  review: one(reviews, { fields: [reviewHelpfulVotes.reviewId], references: [reviews.id] }),
+  user: one(users, { fields: [reviewHelpfulVotes.userId], references: [users.id] }),
+}))
+
+export const reviewReportsRelations = relations(reviewReports, ({ one }) => ({
+  review: one(reviews, { fields: [reviewReports.reviewId], references: [reviews.id] }),
+  reporter: one(users, { fields: [reviewReports.reporterUserId], references: [users.id] }),
+  resolver: one(users, { fields: [reviewReports.resolvedByUserId], references: [users.id] }),
 }))
 
 export const savesRelations = relations(saves, ({ one }) => ({

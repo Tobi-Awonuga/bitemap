@@ -1,12 +1,22 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2,
+  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2, ThumbsUp, Flag,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 
 type ReviewUser = { id: string; displayName: string; avatarUrl?: string | null }
-type ReviewRow = { id: string; rating: number; body?: string | null; createdAt: string; user: ReviewUser }
+type ReviewRow = {
+  id: string
+  rating: number
+  body?: string | null
+  createdAt: string
+  helpfulCount: number
+  isHelpfulByMe: boolean
+  isReportedByMe: boolean
+  user: ReviewUser
+}
 type UserReview = { id: string; rating: number; body?: string | null }
 
 type PlaceDetail = {
@@ -49,6 +59,7 @@ export default function PlaceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
   const [place, setPlace] = useState<PlaceDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +73,7 @@ export default function PlaceDetailPage() {
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [reviewDeleting, setReviewDeleting] = useState(false)
   const [reviewError, setReviewError] = useState<string | null>(null)
+  const [reviewActionPendingId, setReviewActionPendingId] = useState<string | null>(null)
 
   const refreshPlace = async (placeId: string) => {
     const updated = await api.get<PlaceDetail>(`/api/places/${placeId}`)
@@ -153,6 +165,40 @@ export default function PlaceDetailPage() {
       setReviewError(err instanceof Error ? err.message : 'Failed to delete review')
     } finally {
       setReviewDeleting(false)
+    }
+  }
+
+  const handleHelpfulToggle = async (review: ReviewRow) => {
+    if (!place || reviewActionPendingId) return
+    setReviewActionPendingId(review.id)
+    try {
+      if (review.isHelpfulByMe) {
+        await api.del(`/api/reviews/${review.id}/helpful`)
+      } else {
+        await api.post(`/api/reviews/${review.id}/helpful`)
+      }
+      await refreshPlace(place.id)
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Failed to update helpful vote')
+    } finally {
+      setReviewActionPendingId(null)
+    }
+  }
+
+  const handleReport = async (review: ReviewRow) => {
+    if (!place || reviewActionPendingId) return
+    const reason = window.prompt('Report reason (e.g. spam, abusive, fake):', 'spam')
+    if (!reason || reason.trim().length < 2) return
+
+    setReviewActionPendingId(review.id)
+    try {
+      await api.post(`/api/reviews/${review.id}/report`, { reason: reason.trim() })
+      await refreshPlace(place.id)
+      setReviewError(null)
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Failed to report review')
+    } finally {
+      setReviewActionPendingId(null)
     }
   }
 
@@ -458,6 +504,34 @@ export default function PlaceDetailPage() {
                   {review.body && (
                     <p className="text-sm text-slate-600 leading-relaxed">{review.body}</p>
                   )}
+                  <div className="mt-3 flex items-center gap-3">
+                    <button
+                      onClick={() => handleHelpfulToggle(review)}
+                      disabled={reviewActionPendingId === review.id}
+                      className={`text-xs font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-60 ${
+                        review.isHelpfulByMe ? 'text-emerald-600' : 'text-slate-500 hover:text-emerald-600'
+                      }`}
+                    >
+                      {reviewActionPendingId === review.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <ThumbsUp className={`w-3 h-3 ${review.isHelpfulByMe ? 'fill-emerald-600' : ''}`} />
+                      )}
+                      Helpful ({review.helpfulCount})
+                    </button>
+                    {user?.id !== review.user.id && (
+                      <button
+                        onClick={() => handleReport(review)}
+                        disabled={reviewActionPendingId === review.id || review.isReportedByMe}
+                        className={`text-xs font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-60 ${
+                          review.isReportedByMe ? 'text-amber-600' : 'text-slate-500 hover:text-amber-600'
+                        }`}
+                      >
+                        <Flag className={`w-3 h-3 ${review.isReportedByMe ? 'fill-amber-600' : ''}`} />
+                        {review.isReportedByMe ? 'Reported' : 'Report'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

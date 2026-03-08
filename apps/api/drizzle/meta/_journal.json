@@ -50,6 +50,13 @@
       "when": 1772928945295,
       "tag": "0006_gorgeous_maximus",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1772935000000,
+      "tag": "0007_flat_circle",
+      "breakpoints": true
     }
   ]
 }

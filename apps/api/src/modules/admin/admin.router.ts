@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { eq, count, sql, desc } from 'drizzle-orm'
 import { db } from '../../db'
-import { users, places, reviews, saves, visits } from '../../db/schema'
+import { users, places, reviewReports, reviews, saves, visits } from '../../db/schema'
 import { requireAuth, requireAdmin, AuthRequest } from '../../middleware/auth.middleware'
 
 export const adminRouter = Router()
@@ -268,4 +268,88 @@ adminRouter.delete('/reviews/:id', async (req: AuthRequest, res) => {
   }
 
   res.status(204).send()
+})
+
+// GET /api/admin/review-reports?status=open|resolved|dismissed
+adminRouter.get('/review-reports', async (req, res) => {
+  const statusRaw = String(req.query.status ?? 'open')
+  const status = statusRaw === 'resolved' || statusRaw === 'dismissed' ? statusRaw : 'open'
+
+  const reports = await db.query.reviewReports.findMany({
+    where: eq(reviewReports.status, status),
+    with: {
+      reporter: { columns: { id: true, displayName: true, email: true } },
+      resolver: { columns: { id: true, displayName: true, email: true } },
+      review: {
+        columns: { id: true, rating: true, body: true, createdAt: true },
+        with: {
+          user: { columns: { id: true, displayName: true, email: true } },
+          place: { columns: { id: true, name: true, address: true } },
+        },
+      },
+    },
+    orderBy: (table, { desc: descOrder, asc }) => [
+      status === 'open' ? asc(table.createdAt) : descOrder(table.createdAt),
+    ],
+  })
+
+  res.json(
+    reports.map((report) => ({
+      id: report.id,
+      reason: report.reason,
+      details: report.details,
+      status: report.status,
+      createdAt: report.createdAt,
+      resolvedAt: report.resolvedAt,
+      reporter: report.reporter,
+      resolver: report.resolver
+        ? {
+            id: report.resolver.id,
+            displayName: report.resolver.displayName,
+            email: report.resolver.email,
+          }
+        : null,
+      review: {
+        id: report.review.id,
+        rating: report.review.rating,
+        body: report.review.body,
+        createdAt: report.review.createdAt,
+        user: report.review.user,
+        place: report.review.place,
+      },
+    })),
+  )
+})
+
+// PATCH /api/admin/review-reports/:id — resolve or dismiss a report
+adminRouter.patch('/review-reports/:id', async (req: AuthRequest, res) => {
+  const reportId = String(req.params.id)
+  const status = req.body?.status
+
+  if (status !== 'resolved' && status !== 'dismissed' && status !== 'open') {
+    res.status(400).json({ error: 'Invalid status' })
+    return
+  }
+
+  const [updated] = await db
+    .update(reviewReports)
+    .set({
+      status,
+      resolvedAt: status === 'open' ? null : new Date(),
+      resolvedByUserId: status === 'open' ? null : req.user!.id,
+    })
+    .where(eq(reviewReports.id, reportId))
+    .returning({
+      id: reviewReports.id,
+      status: reviewReports.status,
+      resolvedAt: reviewReports.resolvedAt,
+      resolvedByUserId: reviewReports.resolvedByUserId,
+    })
+
+  if (!updated) {
+    res.status(404).json({ error: 'Review report not found' })
+    return
+  }
+
+  res.json(updated)
 })

@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../../db'
-import { places, reviews, saves, visits } from '../../db/schema'
+import { places, reviews, reviewHelpfulVotes, reviewReports, saves, visits } from '../../db/schema'
 import { requireAuth, requireAdmin, type AuthRequest } from '../../middleware/auth.middleware'
 import { placeSchema } from '@bitemap/shared'
 
@@ -514,6 +514,36 @@ placesRouter.get('/:id', requireAuth, async (req: AuthRequest, res) => {
     with: { user: true },
     orderBy: (table, { desc }) => [desc(table.createdAt)],
   })
+  const reviewIds = placeReviews.map((review) => review.id)
+
+  const [helpfulCounts, myHelpfulVotes, myReports] = await Promise.all([
+    reviewIds.length
+      ? db
+          .select({
+            reviewId: reviewHelpfulVotes.reviewId,
+            count: sql<number>`COUNT(*)`.as('count'),
+          })
+          .from(reviewHelpfulVotes)
+          .where(inArray(reviewHelpfulVotes.reviewId, reviewIds))
+          .groupBy(reviewHelpfulVotes.reviewId)
+      : Promise.resolve([]),
+    reviewIds.length
+      ? db.query.reviewHelpfulVotes.findMany({
+          where: and(eq(reviewHelpfulVotes.userId, userId), inArray(reviewHelpfulVotes.reviewId, reviewIds)),
+          columns: { reviewId: true },
+        })
+      : Promise.resolve([]),
+    reviewIds.length
+      ? db.query.reviewReports.findMany({
+          where: and(eq(reviewReports.reporterUserId, userId), inArray(reviewReports.reviewId, reviewIds)),
+          columns: { reviewId: true },
+        })
+      : Promise.resolve([]),
+  ])
+
+  const helpfulCountMap = new Map(helpfulCounts.map((row) => [row.reviewId, Number(row.count)]))
+  const myHelpfulSet = new Set(myHelpfulVotes.map((row) => row.reviewId))
+  const myReportedSet = new Set(myReports.map((row) => row.reviewId))
 
   const saved = await db.query.saves.findFirst({
     where: and(eq(saves.userId, userId), eq(saves.placeId, placeId)),
@@ -541,6 +571,9 @@ placesRouter.get('/:id', requireAuth, async (req: AuthRequest, res) => {
       rating: review.rating,
       body: review.body,
       createdAt: review.createdAt,
+      helpfulCount: helpfulCountMap.get(review.id) ?? 0,
+      isHelpfulByMe: myHelpfulSet.has(review.id),
+      isReportedByMe: myReportedSet.has(review.id),
       user: {
         id: review.user.id,
         displayName: review.user.displayName,
