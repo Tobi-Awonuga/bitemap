@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Search, MapPin, TrendingUp, Sparkles, Loader2 } from 'lucide-react'
+import { Search, MapPin, TrendingUp, Sparkles, Loader2, UserPlus } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import PlaceCard, { type Place } from '../components/ui/PlaceCard'
 import { api } from '../lib/api'
 import { useGeolocation } from '../hooks/useGeolocation'
@@ -17,6 +18,14 @@ type FeedItem = {
   id: string
   createdAt: string
   place: Place
+}
+
+type SuggestedUser = {
+  id: string
+  displayName: string
+  avatarUrl?: string | null
+  reviewCount: number
+  followerCount: number
 }
 
 function pickUnique(places: Place[], excluded: Set<string>, limit: number): Place[] {
@@ -61,6 +70,9 @@ export default function HomePage() {
       return []
     }
   })
+  const [suggestions, setSuggestions] = useState<SuggestedUser[]>([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [followPendingId, setFollowPendingId] = useState<string | null>(null)
   const { coords, permission } = useGeolocation()
   const cacheRef = useRef(new Map<string, Place[]>())
   const requestIdRef = useRef(0)
@@ -185,6 +197,15 @@ export default function HomePage() {
       })
   }, [followingCacheKey])
 
+  useEffect(() => {
+    setSuggestionsLoading(true)
+    api
+      .get<{ data: SuggestedUser[] }>('/api/users/suggestions?limit=6')
+      .then((res) => setSuggestions(res.data))
+      .catch(() => setSuggestions([]))
+      .finally(() => setSuggestionsLoading(false))
+  }, [user?.id])
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     setDebouncedSearch(searchQuery.trim())
@@ -195,6 +216,17 @@ export default function HomePage() {
     // Cuisine chip selection should act as its own filter context.
     setSearchQuery('')
     setDebouncedSearch('')
+  }
+
+  const handleFollowSuggestion = async (targetUserId: string) => {
+    if (followPendingId) return
+    setFollowPendingId(targetUserId)
+    try {
+      await api.post(`/api/users/${targetUserId}/follow`)
+      setSuggestions((prev) => prev.filter((userRow) => userRow.id !== targetUserId))
+    } finally {
+      setFollowPendingId(null)
+    }
   }
 
   const curated = useMemo(() => {
@@ -368,6 +400,45 @@ export default function HomePage() {
                   <PlaceCard key={`follow-${place.id}`} place={place} />
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Follow suggestions */}
+          {(suggestionsLoading || suggestions.length > 0) && (
+            <section>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-slate-900">People You May Know</h2>
+              </div>
+              {suggestionsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {suggestions.map((suggestedUser) => (
+                    <div key={suggestedUser.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3">
+                      <Link to={`/users/${suggestedUser.id}`} className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 truncate">{suggestedUser.displayName}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {suggestedUser.reviewCount} reviews • {suggestedUser.followerCount} followers
+                        </p>
+                      </Link>
+                      <button
+                        onClick={() => handleFollowSuggestion(suggestedUser.id)}
+                        disabled={followPendingId === suggestedUser.id}
+                        className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-60 px-3 py-1.5 rounded-lg"
+                      >
+                        {followPendingId === suggestedUser.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <UserPlus className="w-3 h-3" />
+                        )}
+                        Follow
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
         </>

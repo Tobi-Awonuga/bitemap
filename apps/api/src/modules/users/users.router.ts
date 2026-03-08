@@ -34,6 +34,30 @@ async function getUserStats(userId: string) {
   }
 }
 
+async function getPlaceReviewStats(placeIds: string[]) {
+  if (placeIds.length === 0) return new Map<string, { avgRating: number; reviewCount: number }>()
+
+  const rows = await db
+    .select({
+      placeId: reviews.placeId,
+      avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`.as('avg_rating'),
+      reviewCount: sql<number>`COUNT(*)`.as('review_count'),
+    })
+    .from(reviews)
+    .where(inArray(reviews.placeId, placeIds))
+    .groupBy(reviews.placeId)
+
+  return new Map(
+    rows.map((row) => [
+      row.placeId,
+      {
+        avgRating: Number(row.avgRating),
+        reviewCount: Number(row.reviewCount),
+      },
+    ]),
+  )
+}
+
 // GET /api/users/me
 usersRouter.get('/me', requireAuth, async (req: AuthRequest, res) => {
   const user = await db.query.users.findFirst({
@@ -79,7 +103,7 @@ usersRouter.get('/feed', requireAuth, async (req: AuthRequest, res) => {
       where: inArray(reviews.userId, followingIds),
       with: {
         user: { columns: { id: true, displayName: true, avatarUrl: true } },
-        place: { columns: { id: true, name: true, cuisine: true, imageUrl: true } },
+        place: { columns: { id: true, name: true, cuisine: true, address: true, imageUrl: true } },
       },
       orderBy: (table) => [desc(table.createdAt)],
       limit: 25,
@@ -88,12 +112,20 @@ usersRouter.get('/feed', requireAuth, async (req: AuthRequest, res) => {
       where: inArray(visits.userId, followingIds),
       with: {
         user: { columns: { id: true, displayName: true, avatarUrl: true } },
-        place: { columns: { id: true, name: true, cuisine: true, imageUrl: true } },
+        place: { columns: { id: true, name: true, cuisine: true, address: true, imageUrl: true } },
       },
       orderBy: (table) => [desc(table.visitedAt)],
       limit: 25,
     }),
   ])
+
+  const placeIds = Array.from(
+    new Set([
+      ...recentReviews.map((row) => row.place.id),
+      ...recentVisits.map((row) => row.place.id),
+    ]),
+  )
+  const placeStats = await getPlaceReviewStats(placeIds)
 
   const reviewItems = recentReviews.map((row) => ({
     type: 'review' as const,
@@ -103,6 +135,8 @@ usersRouter.get('/feed', requireAuth, async (req: AuthRequest, res) => {
     place: {
       ...row.place,
       imageUrl: serializeImageUrl(row.place.id, row.place.imageUrl),
+      avgRating: placeStats.get(row.place.id)?.avgRating ?? 0,
+      reviewCount: placeStats.get(row.place.id)?.reviewCount ?? 0,
     },
     review: { rating: row.rating, body: row.body },
   }))
@@ -115,6 +149,8 @@ usersRouter.get('/feed', requireAuth, async (req: AuthRequest, res) => {
     place: {
       ...row.place,
       imageUrl: serializeImageUrl(row.place.id, row.place.imageUrl),
+      avgRating: placeStats.get(row.place.id)?.avgRating ?? 0,
+      reviewCount: placeStats.get(row.place.id)?.reviewCount ?? 0,
     },
   }))
 
@@ -123,6 +159,47 @@ usersRouter.get('/feed', requireAuth, async (req: AuthRequest, res) => {
     .slice(0, 40)
 
   res.json({ data: merged })
+})
+
+// GET /api/users/suggestions?limit=6 - suggested users to follow
+usersRouter.get('/suggestions', requireAuth, async (req: AuthRequest, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '6'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 20) : 6
+
+  const followingRows = await db.query.follows.findMany({
+    where: eq(follows.followerId, req.user!.id),
+    columns: { followingId: true },
+  })
+  const followingIds = new Set(followingRows.map((row) => row.followingId))
+
+  const candidates = await db
+    .select({
+      id: users.id,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      createdAt: users.createdAt,
+      reviewCount: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('review_count'),
+      followerCount: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('follower_count'),
+    })
+    .from(users)
+    .where(and(eq(users.isActive, true)))
+    .orderBy(desc(users.createdAt))
+    .limit(50)
+
+  const suggestions = candidates
+    .filter((user) => user.id !== req.user!.id && !followingIds.has(user.id))
+    .sort((a, b) => Number(b.reviewCount) - Number(a.reviewCount) || Number(b.followerCount) - Number(a.followerCount))
+    .slice(0, limit)
+    .map((user) => ({
+      id: user.id,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl,
+      reviewCount: Number(user.reviewCount),
+      followerCount: Number(user.followerCount),
+      createdAt: user.createdAt,
+    }))
+
+  res.json({ data: suggestions })
 })
 
 // GET /api/users/:id - public profile with follow context
