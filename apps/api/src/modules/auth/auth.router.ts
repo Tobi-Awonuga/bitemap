@@ -6,6 +6,7 @@ import { and, count, eq, gt, isNull } from 'drizzle-orm'
 import { db } from '../../db'
 import { passwordResets, users } from '../../db/schema'
 import { forgotPasswordSchema, loginSchema, registerSchema, resetPasswordSchema } from '@bitemap/shared'
+import { emailEnabled, sendPasswordResetEmail } from '../../lib/email'
 
 export const authRouter = Router()
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
@@ -171,6 +172,31 @@ authRouter.post('/forgot-password', async (req, res) => {
 
   const frontendBaseUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173'
   const resetUrl = `${frontendBaseUrl.replace(/\/$/, '')}/reset-password?token=${token}`
+  let sentEmail = false
+  try {
+    sentEmail = await sendPasswordResetEmail({
+      to: user.email,
+      displayName: user.displayName,
+      resetUrl,
+    })
+  } catch (err) {
+    console.error('Failed to send password reset email:', err)
+    if (process.env.NODE_ENV === 'production') {
+      res.status(503).json({ error: 'Password reset is temporarily unavailable' })
+      return
+    }
+  }
+
+  if (!sentEmail) {
+    if (process.env.NODE_ENV === 'production' && emailEnabled()) {
+      res.status(503).json({ error: 'Password reset is temporarily unavailable' })
+      return
+    }
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[dev] Password reset URL for ${user.email}: ${resetUrl}`)
+    }
+  }
+
   res.status(200).json({
     message: 'If an account exists, a reset link has been sent.',
     ...(process.env.NODE_ENV !== 'production' ? { resetUrl } : {}),
