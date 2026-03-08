@@ -13,6 +13,7 @@ function formatJoinDate(dateStr: string): string {
 }
 
 type Stats = { saves: number; visits: number; reviews: number; followers: number; following: number }
+type TasteProfile = { cuisines: Array<{ cuisine: string; score: number }>; totalSignals: number }
 type FeedItem = {
   type: 'review' | 'visit'
   id: string
@@ -28,6 +29,7 @@ export default function ProfilePage() {
   const [stats, setStats] = useState<Stats>({ saves: 0, visits: 0, reviews: 0, followers: 0, following: 0 })
   const [feed, setFeed] = useState<FeedItem[]>([])
   const [feedLoading, setFeedLoading] = useState(true)
+  const [tasteProfile, setTasteProfile] = useState<TasteProfile>({ cuisines: [], totalSignals: 0 })
 
   useEffect(() => {
     if (!user) return
@@ -35,6 +37,14 @@ export default function ProfilePage() {
       .get<{ data: Stats }>('/api/users/me/stats')
       .then((res) => setStats(res.data))
       .catch(() => setStats({ saves: 0, visits: 0, reviews: 0, followers: 0, following: 0 }))
+  }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    api
+      .get<{ data: TasteProfile }>('/api/users/me/taste-profile')
+      .then((res) => setTasteProfile(res.data))
+      .catch(() => setTasteProfile({ cuisines: [], totalSignals: 0 }))
   }, [user])
 
   useEffect(() => {
@@ -135,6 +145,21 @@ export default function ProfilePage() {
                   </p>
                 )}
               </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm p-6">
+        <h2 className="text-base font-bold text-slate-900 mb-3">Your taste profile</h2>
+        {tasteProfile.cuisines.length === 0 ? (
+          <p className="text-sm text-slate-500">Rate and visit more places to build your taste profile.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {tasteProfile.cuisines.map((item) => (
+              <span key={item.cuisine} className="inline-flex items-center gap-1 text-xs bg-orange-50 text-orange-600 rounded-full px-3 py-1">
+                {item.cuisine}
+              </span>
             ))}
           </div>
         )}

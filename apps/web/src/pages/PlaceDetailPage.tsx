@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2, ThumbsUp, Flag,
+  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2, ThumbsUp, Flag, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
@@ -74,6 +74,8 @@ export default function PlaceDetailPage() {
   const [reviewDeleting, setReviewDeleting] = useState(false)
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewActionPendingId, setReviewActionPendingId] = useState<string | null>(null)
+  const [photoUrls, setPhotoUrls] = useState<string[]>([])
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0)
 
   const refreshPlace = async (placeId: string) => {
     const updated = await api.get<PlaceDetail>(`/api/places/${placeId}`)
@@ -88,6 +90,32 @@ export default function PlaceDetailPage() {
       .catch(() => setError('Could not load place.'))
       .finally(() => setLoading(false))
   }, [id])
+
+  useEffect(() => {
+    if (!place?.id) return
+    let cancelled = false
+    api
+      .get<{ data: string[] }>(`/api/places/${place.id}/photos`)
+      .then((res) => {
+        if (cancelled) return
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          setPhotoUrls(res.data)
+          setActivePhotoIndex(0)
+          return
+        }
+        setPhotoUrls(place.imageUrl ? [place.imageUrl] : [])
+        setActivePhotoIndex(0)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setPhotoUrls(place.imageUrl ? [place.imageUrl] : [])
+        setActivePhotoIndex(0)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [place?.id, place?.imageUrl])
 
   const toggleSave = async () => {
     if (!place || savePending) return
@@ -224,6 +252,7 @@ export default function PlaceDetailPage() {
 
   const gradient = gradientFor(place.id)
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.latitude},${place.longitude}`
+  const hasGallery = photoUrls.length > 0
   const fromPath = typeof location.state === 'object' && location.state !== null && 'from' in location.state
     ? String((location.state as { from?: string }).from ?? '')
     : ''
@@ -245,10 +274,60 @@ export default function PlaceDetailPage() {
       <div
         className={`relative h-72 md:h-80 rounded-b-3xl overflow-hidden ${!place.imageUrl ? `bg-gradient-to-br ${gradient}` : 'bg-slate-200'}`}
       >
-        {place.imageUrl && (
-          <img src={place.imageUrl} alt={place.name} className="absolute inset-0 w-full h-full object-cover" />
+        {hasGallery ? (
+          <div className="absolute inset-0 overflow-hidden">
+            <div
+              className="flex h-full transition-transform duration-500 ease-out"
+              style={{ transform: `translateX(-${activePhotoIndex * 100}%)` }}
+            >
+              {photoUrls.map((url, idx) => (
+                <img
+                  key={`${url}-${idx}`}
+                  src={url}
+                  alt={`${place.name} photo ${idx + 1}`}
+                  className="w-full h-full object-cover min-w-full"
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          place.imageUrl && (
+            <img src={place.imageUrl} alt={place.name} className="absolute inset-0 w-full h-full object-cover" />
+          )
         )}
         <div className="absolute inset-0 bg-black/20" />
+
+        {photoUrls.length > 1 && (
+          <>
+            <button
+              onClick={() => setActivePhotoIndex((prev) => (prev - 1 + photoUrls.length) % photoUrls.length)}
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/85 hover:bg-white text-slate-800 flex items-center justify-center transition-colors"
+              aria-label="Previous photo"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setActivePhotoIndex((prev) => (prev + 1) % photoUrls.length)}
+              className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/85 hover:bg-white text-slate-800 flex items-center justify-center transition-colors"
+              aria-label="Next photo"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+              {photoUrls.map((_, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setActivePhotoIndex(idx)}
+                  className={`w-2 h-2 rounded-full transition-colors ${
+                    idx === activePhotoIndex ? 'bg-white' : 'bg-white/50'
+                  }`}
+                  aria-label={`Show photo ${idx + 1}`}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
         <button
           onClick={handleBack}

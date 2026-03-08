@@ -194,6 +194,10 @@ function serializeImageUrl(placeId: string, imageUrl: string | null): string | n
   return imageUrl
 }
 
+function buildPhotoProxyUrl(placeId: string, photoName: string): string {
+  return `/api/places/${placeId}/image?photo=${encodeURIComponent(photoName)}`
+}
+
 function serializePlaceRow(row: PlaceListRow): PlaceListRow {
   return {
     ...row,
@@ -443,6 +447,53 @@ placesRouter.get('/nearby', requireAuth, async (req: AuthRequest, res) => {
   res.json(rows)
 })
 
+// GET /api/places/:id/photos - best-effort place photo gallery list
+placesRouter.get('/:id/photos', requireAuth, async (req: AuthRequest, res) => {
+  const placeId = String(req.params.id)
+  const place = await db.query.places.findFirst({
+    where: eq(places.id, placeId),
+    columns: { googlePlaceId: true, imageUrl: true },
+  })
+
+  if (!place) {
+    res.status(404).json({ error: 'Place not found' })
+    return
+  }
+
+  const fallback = serializeImageUrl(placeId, place.imageUrl)
+  if (!GOOGLE_MAPS_API_KEY || !place.googlePlaceId) {
+    res.json({ data: fallback ? [fallback] : [] })
+    return
+  }
+
+  try {
+    const response = await fetch(`https://places.googleapis.com/v1/places/${place.googlePlaceId}`, {
+      headers: {
+        'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
+        'X-Goog-FieldMask': 'photos',
+      },
+    })
+    if (!response.ok) {
+      res.json({ data: fallback ? [fallback] : [] })
+      return
+    }
+    const payload = (await response.json()) as { photos?: Array<{ name?: string }> }
+    const photoUrls = (payload.photos ?? [])
+      .map((photo) => photo.name)
+      .filter((name): name is string => !!name)
+      .slice(0, 8)
+      .map((name) => buildPhotoProxyUrl(placeId, name))
+
+    if (photoUrls.length === 0 && fallback) {
+      res.json({ data: [fallback] })
+      return
+    }
+    res.json({ data: photoUrls })
+  } catch {
+    res.json({ data: fallback ? [fallback] : [] })
+  }
+})
+
 // GET /api/places/:id/image - proxy Google photo resources so API keys are never exposed to the client
 placesRouter.get('/:id/image', async (req, res) => {
   const placeId = String(req.params.id)
@@ -451,13 +502,15 @@ placesRouter.get('/:id/image', async (req, res) => {
     columns: { imageUrl: true },
   })
 
-  if (!place?.imageUrl) {
+  const requestedPhoto = typeof req.query.photo === 'string' ? req.query.photo : null
+  if (!place?.imageUrl && !requestedPhoto) {
     res.status(404).json({ error: 'Image not found' })
     return
   }
 
-  if (!place.imageUrl.startsWith(GOOGLE_PHOTO_PREFIX)) {
-    res.redirect(place.imageUrl)
+  const storedImageUrl = place?.imageUrl ?? null
+  if (!requestedPhoto && storedImageUrl && !storedImageUrl.startsWith(GOOGLE_PHOTO_PREFIX)) {
+    res.redirect(storedImageUrl)
     return
   }
 
@@ -466,9 +519,13 @@ placesRouter.get('/:id/image', async (req, res) => {
     return
   }
 
-  const photoName = place.imageUrl.slice(GOOGLE_PHOTO_PREFIX.length)
+  const photoName = requestedPhoto || (storedImageUrl ? storedImageUrl.slice(GOOGLE_PHOTO_PREFIX.length) : '')
   if (!photoName) {
     res.status(404).json({ error: 'Image not found' })
+    return
+  }
+  if (!photoName.startsWith('places/')) {
+    res.status(400).json({ error: 'Invalid photo reference' })
     return
   }
 

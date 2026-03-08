@@ -49,6 +49,7 @@ export default function UserProfilePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [tasteMatch, setTasteMatch] = useState<{ score: number; overlap: string[] } | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -61,6 +62,14 @@ export default function UserProfilePage() {
   }, [id])
 
   const isSelf = useMemo(() => !!me && !!profile && me.id === profile.user.id, [me, profile])
+
+  useEffect(() => {
+    if (!id || isSelf) return
+    api
+      .get<{ data: { score: number; overlap: string[] } }>(`/api/users/${id}/match`)
+      .then((res) => setTasteMatch(res.data))
+      .catch(() => setTasteMatch(null))
+  }, [id, isSelf])
 
   const toggleFollow = async () => {
     if (!profile || !id || pending || isSelf) return
@@ -150,6 +159,17 @@ export default function UserProfilePage() {
             </button>
           )}
         </div>
+
+        {!isSelf && tasteMatch && (
+          <div className="mt-4 rounded-xl bg-orange-50 border border-orange-100 px-4 py-3">
+            <p className="text-sm font-semibold text-orange-700">Taste match: {tasteMatch.score}%</p>
+            {tasteMatch.overlap.length > 0 && (
+              <p className="text-xs text-orange-600 mt-1">
+                Shared cuisines: {tasteMatch.overlap.join(', ')}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-5 gap-2 mt-6">
           <div className="bg-slate-50 rounded-xl p-3 text-center">

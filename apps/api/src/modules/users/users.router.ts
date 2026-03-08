@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../../db'
-import { follows, reviews, saves, users, visits } from '../../db/schema'
+import { follows, places, reviews, saves, users, visits } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
 import { createNotification } from '../notifications/notifications.service'
 
@@ -58,6 +58,62 @@ async function getPlaceReviewStats(placeIds: string[]) {
   )
 }
 
+type TasteVector = Map<string, number>
+
+async function getTasteVector(userId: string): Promise<TasteVector> {
+  const [reviewRows, visitRows] = await Promise.all([
+    db
+      .select({ cuisine: places.cuisine, rating: reviews.rating })
+      .from(reviews)
+      .innerJoin(places, eq(places.id, reviews.placeId))
+      .where(eq(reviews.userId, userId)),
+    db
+      .select({ cuisine: places.cuisine })
+      .from(visits)
+      .innerJoin(places, eq(places.id, visits.placeId))
+      .where(eq(visits.userId, userId)),
+  ])
+
+  const vector: TasteVector = new Map()
+  for (const row of reviewRows) {
+    if (!row.cuisine) continue
+    const key = row.cuisine.toLowerCase()
+    const current = vector.get(key) ?? 0
+    vector.set(key, current + Number(row.rating))
+  }
+  for (const row of visitRows) {
+    if (!row.cuisine) continue
+    const key = row.cuisine.toLowerCase()
+    const current = vector.get(key) ?? 0
+    vector.set(key, current + 0.5)
+  }
+  return vector
+}
+
+function topTasteCuisines(vector: TasteVector, limit = 5): Array<{ cuisine: string; score: number }> {
+  return Array.from(vector.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([cuisine, score]) => ({ cuisine, score: Number(score.toFixed(2)) }))
+}
+
+function tasteMatchPercent(a: TasteVector, b: TasteVector): number {
+  if (a.size === 0 || b.size === 0) return 0
+  const allKeys = new Set([...a.keys(), ...b.keys()])
+  let dot = 0
+  let magA = 0
+  let magB = 0
+  for (const key of allKeys) {
+    const av = a.get(key) ?? 0
+    const bv = b.get(key) ?? 0
+    dot += av * bv
+    magA += av * av
+    magB += bv * bv
+  }
+  if (magA === 0 || magB === 0) return 0
+  return Math.round((dot / (Math.sqrt(magA) * Math.sqrt(magB))) * 100)
+}
+
 // GET /api/users/me
 usersRouter.get('/me', requireAuth, async (req: AuthRequest, res) => {
   const user = await db.query.users.findFirst({
@@ -84,6 +140,17 @@ usersRouter.get('/me', requireAuth, async (req: AuthRequest, res) => {
 usersRouter.get('/me/stats', requireAuth, async (req: AuthRequest, res) => {
   const stats = await getUserStats(req.user!.id)
   res.json({ data: stats })
+})
+
+// GET /api/users/me/taste-profile
+usersRouter.get('/me/taste-profile', requireAuth, async (req: AuthRequest, res) => {
+  const vector = await getTasteVector(req.user!.id)
+  res.json({
+    data: {
+      cuisines: topTasteCuisines(vector, 6),
+      totalSignals: vector.size,
+    },
+  })
 })
 
 // GET /api/users/feed - recent activity from followed users
@@ -200,6 +267,31 @@ usersRouter.get('/suggestions', requireAuth, async (req: AuthRequest, res) => {
     }))
 
   res.json({ data: suggestions })
+})
+
+// GET /api/users/:id/match - cosine similarity taste match with current user
+usersRouter.get('/:id/match', requireAuth, async (req: AuthRequest, res) => {
+  const targetUserId = String(req.params.id)
+  if (targetUserId === req.user!.id) {
+    res.json({ data: { score: 100, overlap: [] } })
+    return
+  }
+
+  const [meVector, otherVector] = await Promise.all([
+    getTasteVector(req.user!.id),
+    getTasteVector(targetUserId),
+  ])
+
+  const overlap = Array.from(meVector.keys())
+    .filter((key) => otherVector.has(key))
+    .slice(0, 5)
+
+  res.json({
+    data: {
+      score: tasteMatchPercent(meVector, otherVector),
+      overlap,
+    },
+  })
 })
 
 // GET /api/users/:id - public profile with follow context
