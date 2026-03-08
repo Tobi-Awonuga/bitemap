@@ -34,6 +34,11 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+function getResultLimit(radiusKm: number): number {
+  const extraSteps = Math.max(0, Math.floor(radiusKm - 2))
+  return Math.min(100, 20 + extraSteps * 5)
+}
+
 const FALLBACK_GRADIENTS = [
   'from-slate-700 to-slate-900',
   'from-pink-400 to-rose-500',
@@ -88,10 +93,31 @@ export default function MapPage() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [radiusKm, setRadiusKm] = useState(8)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [radiusKm, setRadiusKm] = useState(2)
   const [activeCuisine, setActiveCuisine] = useState('All')
   const { coords, permission, error: geoError, requestLocation } = useGeolocation()
+  const [locationSettled, setLocationSettled] = useState(false)
   const cacheRef = useRef(new Map<string, MapPlace[]>())
+  const requestedLocationRef = useRef(false)
+  const requestIdRef = useRef(0)
+  const placesRef = useRef<MapPlace[]>([])
+  const prevSearchRef = useRef('')
+  const prevRadiusRef = useRef(2)
+
+  useEffect(() => {
+    if (requestedLocationRef.current) return
+    requestedLocationRef.current = true
+    requestLocation()
+  }, [requestLocation])
+
+  useEffect(() => {
+    if (coords || permission === 'denied') setLocationSettled(true)
+  }, [coords, permission])
+
+  useEffect(() => {
+    placesRef.current = places
+  }, [places])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 350)
@@ -99,10 +125,11 @@ export default function MapPage() {
   }, [search])
 
   const requestUrl = useMemo(() => {
+    if (!coords && !locationSettled) return null
     const params = new URLSearchParams()
     const query = debouncedSearch.trim()
     if (query.length >= 2) params.set('q', query)
-    params.set('limit', '24')
+    params.set('limit', String(getResultLimit(radiusKm)))
     if (coords) {
       params.set('lat', String(coords.lat))
       params.set('lng', String(coords.lng))
@@ -110,10 +137,12 @@ export default function MapPage() {
     }
     const endpoint = coords ? '/api/places/nearby' : '/api/places'
     return `${endpoint}?${params}`
-  }, [coords, debouncedSearch, radiusKm])
+  }, [coords, debouncedSearch, locationSettled, radiusKm])
 
   useEffect(() => {
+    if (!requestUrl) return
     const fetchPlaces = async () => {
+      const requestId = ++requestIdRef.current
       const cached = cacheRef.current.get(requestUrl)
       if (cached) {
         setPlaces(cached)
@@ -125,13 +154,38 @@ export default function MapPage() {
       }
       try {
         const data = await api.get<MapPlace[]>(requestUrl)
-        cacheRef.current.set(requestUrl, data)
-        setPlaces(data)
+        if (requestId !== requestIdRef.current) return
+        const currentSearch = debouncedSearch.trim().toLowerCase()
+        const sameSearch = currentSearch === prevSearchRef.current
+        const radiusIncreased = radiusKm > prevRadiusRef.current
+
+        let nextData = data
+        if (sameSearch && radiusIncreased && placesRef.current.length > 0) {
+          const merged = new Map<string, MapPlace>()
+          placesRef.current.forEach((place) => merged.set(place.id, place))
+          data.forEach((place) => merged.set(place.id, place))
+          nextData = Array.from(merged.values())
+          if (coords) {
+            nextData.sort(
+              (a, b) =>
+                haversineKm(coords.lat, coords.lng, a.latitude, a.longitude) -
+                haversineKm(coords.lat, coords.lng, b.latitude, b.longitude),
+            )
+          }
+          nextData = nextData.slice(0, getResultLimit(radiusKm))
+        }
+
+        cacheRef.current.set(requestUrl, nextData)
+        setPlaces(nextData)
+        prevSearchRef.current = currentSearch
+        prevRadiusRef.current = radiusKm
         setError(null)
       } catch (err) {
+        if (requestId !== requestIdRef.current) return
         if (!cached) setPlaces([])
         setError(err instanceof Error ? err.message : 'Failed to load map places')
       } finally {
+        if (requestId !== requestIdRef.current) return
         setLoading(false)
         setRefreshing(false)
       }
@@ -147,10 +201,7 @@ export default function MapPage() {
     return ['All', ...Array.from(values).sort((a, b) => a.localeCompare(b))]
   }, [places])
 
-  const filteredPlaces = useMemo(() => {
-    if (activeCuisine === 'All') return places
-    return places.filter((place) => place.cuisine === activeCuisine)
-  }, [activeCuisine, places])
+  const filteredPlaces = places
 
   const listedPlaces = useMemo(() => {
     return filteredPlaces.map((place) => {
@@ -160,19 +211,59 @@ export default function MapPage() {
     })
   }, [coords, filteredPlaces])
 
+  const suggestions = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (query.length < 1) return []
+
+    const pool = new Set<string>()
+    for (const place of places) {
+      pool.add(place.name)
+      if (place.cuisine) pool.add(place.cuisine)
+    }
+
+    const defaults = ['Cafe', 'Coffee', 'Restaurant', 'Pizza', 'Burger', 'Sushi', 'Shawarma']
+    defaults.forEach((item) => pool.add(item))
+
+    return Array.from(pool)
+      .filter((item) => item.toLowerCase().includes(query))
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, 6)
+  }, [places, search])
+
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
       <aside className="w-full sm:w-80 lg:w-96 flex flex-col bg-white border-r border-slate-100 shrink-0 overflow-hidden">
         <div className="p-4 border-b border-slate-100 space-y-3">
-          <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-200">
+          <div className="relative">
+            <div className="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-200">
             <Search className="w-4 h-4 text-slate-400 shrink-0" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 120)}
               placeholder="Search on map..."
               className="flex-1 bg-transparent text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
             />
+            </div>
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute z-[1000] mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => {
+                      setSearch(suggestion)
+                      setShowSuggestions(false)
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -199,8 +290,15 @@ export default function MapPage() {
             {cuisines.map((tag) => (
               <button
                 key={tag}
-                onClick={() => setActiveCuisine(tag)}
-                className="text-xs font-medium text-slate-600 bg-slate-100 hover:bg-orange-50 hover:text-orange-500 rounded-lg px-3 py-1.5 transition-colors"
+                onClick={() => {
+                  setActiveCuisine(tag)
+                  setSearch(tag === 'All' ? '' : tag)
+                }}
+                className={`text-xs font-medium rounded-lg px-3 py-1.5 transition-colors ${
+                  activeCuisine === tag
+                    ? 'bg-orange-500 text-white'
+                    : 'text-slate-600 bg-slate-100 hover:bg-orange-50 hover:text-orange-500'
+                }`}
               >
                 {tag}
               </button>
@@ -212,6 +310,9 @@ export default function MapPage() {
           <p className="text-xs text-slate-400 font-medium">
             <span className="text-slate-900 font-semibold">{listedPlaces.length}</span> places nearby
           </p>
+          {!locationSettled && (
+            <p className="text-xs text-slate-500 mt-1">Finding your location before loading nearby places...</p>
+          )}
           {refreshing && <p className="text-xs text-slate-500 mt-1">Refreshing nearby places...</p>}
           {permission === 'denied' && (
             <p className="text-xs text-amber-600 mt-1">Location blocked. Showing broader results.</p>
