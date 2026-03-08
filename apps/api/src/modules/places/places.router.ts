@@ -83,9 +83,8 @@ const CUISINE_TYPE_LABELS: Record<string, string> = {
   coffee_shop: 'Cafe',
   bakery: 'Bakery',
   bar: 'Bar',
-  meal_takeaway: 'Fast Casual',
+  meal_takeaway: 'Takeout',
   meal_delivery: 'Delivery',
-  food: 'Food',
 }
 
 const nearbyCache = new Map<string, NearbyCacheEntry>()
@@ -159,12 +158,25 @@ function inferCuisine(types: string[] | undefined): string | null {
       .join(' ')
   }
 
-  for (const type of types) {
+  const preferredTypeOrder = ['cafe', 'coffee_shop', 'bakery', 'bar', 'meal_takeaway', 'meal_delivery']
+  for (const type of preferredTypeOrder) {
+    if (!types.includes(type)) continue
     const mapped = CUISINE_TYPE_LABELS[type]
     if (mapped) return mapped
   }
 
   return null
+}
+
+function buildTextQuery(rawQuery: string | undefined): string {
+  if (!rawQuery) return 'restaurants'
+  const query = rawQuery.trim()
+  if (query.length < 2) return 'restaurants'
+  const lower = query.toLowerCase()
+
+  // Preserve direct venue-name and cafe searches as typed.
+  if (lower.includes('cafe') || lower.includes('coffee')) return query
+  return `${query} restaurants`
 }
 
 function isFoodPlace(types: string[] | undefined): boolean {
@@ -289,7 +301,7 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
         'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.types,places.photos',
     },
     body: JSON.stringify({
-      textQuery: parsed.q ? `${parsed.q} restaurants` : 'restaurants',
+      textQuery: buildTextQuery(parsed.q),
       pageSize: parsed.limit,
       locationBias: {
         circle: {

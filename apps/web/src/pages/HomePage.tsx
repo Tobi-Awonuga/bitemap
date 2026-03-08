@@ -64,8 +64,9 @@ export default function HomePage() {
 
   const requestUrl = useMemo(() => {
     const params = new URLSearchParams()
+    const query = debouncedSearch.trim()
     const cuisine = activeTag !== 'All' ? activeTag : ''
-    if (debouncedSearch) params.set('q', debouncedSearch)
+    if (query.length >= 2) params.set('q', query)
     else if (cuisine) params.set('q', cuisine)
     params.set('limit', '24')
     if (coords) {

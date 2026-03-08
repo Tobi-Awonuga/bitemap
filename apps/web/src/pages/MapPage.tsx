@@ -100,14 +100,16 @@ export default function MapPage() {
 
   const requestUrl = useMemo(() => {
     const params = new URLSearchParams()
-    if (debouncedSearch) params.set('q', debouncedSearch)
+    const query = debouncedSearch.trim()
+    if (query.length >= 2) params.set('q', query)
     params.set('limit', '24')
     if (coords) {
       params.set('lat', String(coords.lat))
       params.set('lng', String(coords.lng))
       params.set('radius', String(radiusKm))
     }
-    return `/api/places/nearby?${params}`
+    const endpoint = coords ? '/api/places/nearby' : '/api/places'
+    return `${endpoint}?${params}`
   }, [coords, debouncedSearch, radiusKm])
 
   useEffect(() => {
