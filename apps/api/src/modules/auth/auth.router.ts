@@ -11,25 +11,55 @@ import { emailEnabled, sendPasswordResetEmail } from '../../lib/email'
 export const authRouter = Router()
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_MAX_ATTEMPTS = 8
+const REGISTER_WINDOW_MS = 15 * 60 * 1000
+const REGISTER_MAX_ATTEMPTS = 5
+const FORGOT_WINDOW_MS = 15 * 60 * 1000
+const FORGOT_MAX_ATTEMPTS = 6
+const RESET_WINDOW_MS = 15 * 60 * 1000
+const RESET_MAX_ATTEMPTS = 10
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000
-const loginAttempts = new Map<string, { count: number; resetAt: number }>()
+const MAX_RATE_LIMIT_KEYS = 5000
+type AttemptStore = Map<string, { count: number; resetAt: number }>
+const loginAttempts: AttemptStore = new Map()
+const registerAttempts: AttemptStore = new Map()
+const forgotPasswordAttempts: AttemptStore = new Map()
+const resetPasswordAttempts: AttemptStore = new Map()
 
 function getClientKey(ip: string | undefined, email: string): string {
   return `${ip ?? 'unknown'}:${email}`
 }
 
-function canAttemptLogin(key: string): boolean {
+function trimAttemptStore(store: AttemptStore, now: number): void {
+  for (const [key, value] of store.entries()) {
+    if (value.resetAt <= now) {
+      store.delete(key)
+    }
+  }
+
+  const overflow = store.size - MAX_RATE_LIMIT_KEYS
+  if (overflow <= 0) {
+    return
+  }
+
+  const oldestKeys = Array.from(store.keys()).slice(0, overflow)
+  for (const key of oldestKeys) {
+    store.delete(key)
+  }
+}
+
+function canAttempt(store: AttemptStore, key: string, maxAttempts: number, windowMs: number): boolean {
   const now = Date.now()
-  const current = loginAttempts.get(key)
+  trimAttemptStore(store, now)
+  const current = store.get(key)
   if (!current || current.resetAt <= now) {
-    loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS })
+    store.set(key, { count: 1, resetAt: now + windowMs })
     return true
   }
-  if (current.count >= LOGIN_MAX_ATTEMPTS) {
+  if (current.count >= maxAttempts) {
     return false
   }
   current.count += 1
-  loginAttempts.set(key, current)
+  store.set(key, current)
   return true
 }
 
@@ -50,6 +80,11 @@ authRouter.post('/register', async (req, res) => {
   }
 
   const { email, password, displayName } = parsed.data
+  const ipKey = req.ip ?? 'unknown'
+  if (!canAttempt(registerAttempts, ipKey, REGISTER_MAX_ATTEMPTS, REGISTER_WINDOW_MS)) {
+    res.status(429).json({ error: 'Too many registration attempts. Try again later.' })
+    return
+  }
 
   const existing = await db.query.users.findFirst({ where: eq(users.email, email) })
   if (existing) {
@@ -106,7 +141,7 @@ authRouter.post('/login', async (req, res) => {
 
   const { email, password } = parsed.data
   const clientKey = getClientKey(req.ip, email)
-  if (!canAttemptLogin(clientKey)) {
+  if (!canAttempt(loginAttempts, clientKey, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MS)) {
     res.status(429).json({ error: 'Too many login attempts. Try again later.' })
     return
   }
@@ -159,6 +194,11 @@ authRouter.post('/forgot-password', async (req, res) => {
   }
 
   const { email } = parsed.data
+  const forgotKey = getClientKey(req.ip, email)
+  if (!canAttempt(forgotPasswordAttempts, forgotKey, FORGOT_MAX_ATTEMPTS, FORGOT_WINDOW_MS)) {
+    res.status(429).json({ error: 'Too many password reset requests. Try again later.' })
+    return
+  }
   const user = await db.query.users.findFirst({ where: eq(users.email, email) })
   if (!user) {
     res.status(200).json({ message: 'If an account exists, a reset link has been sent.' })
@@ -179,6 +219,8 @@ authRouter.post('/forgot-password', async (req, res) => {
   const frontendBaseUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173'
   const resetUrl = `${frontendBaseUrl.replace(/\/$/, '')}/reset-password?token=${token}`
   let sentEmail = false
+  let delivery: 'email' | 'dev-link' | 'unavailable' = 'unavailable'
+  let hint: string | undefined
   try {
     sentEmail = await sendPasswordResetEmail({
       to: user.email,
@@ -200,11 +242,20 @@ authRouter.post('/forgot-password', async (req, res) => {
     }
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[dev] Password reset URL for ${user.email}: ${resetUrl}`)
+      delivery = 'dev-link'
+      hint = emailEnabled()
+        ? 'Email delivery failed in development, so a direct reset link is provided below.'
+        : 'SMTP is not configured, so no email is sent in development. Use the direct reset link below.'
     }
+  } else {
+    delivery = 'email'
+    hint = 'If this email exists, a reset link has been sent. Check spam/junk if it does not appear.'
   }
 
   res.status(200).json({
     message: 'If an account exists, a reset link has been sent.',
+    delivery,
+    ...(hint ? { hint } : {}),
     ...(process.env.NODE_ENV !== 'production' ? { resetUrl } : {}),
   })
 })
@@ -218,6 +269,11 @@ authRouter.post('/reset-password', async (req, res) => {
   }
 
   const { token, password } = parsed.data
+  const resetKey = req.ip ?? 'unknown'
+  if (!canAttempt(resetPasswordAttempts, resetKey, RESET_MAX_ATTEMPTS, RESET_WINDOW_MS)) {
+    res.status(429).json({ error: 'Too many password reset attempts. Try again later.' })
+    return
+  }
   const tokenHash = hashResetToken(token)
   const now = new Date()
 

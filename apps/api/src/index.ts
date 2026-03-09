@@ -22,6 +22,30 @@ const PORT = Number(process.env.PORT ?? 4000)
 const SHOULD_RUN_MIGRATIONS = process.env.RUN_MIGRATIONS !== 'false'
 const JWT_SECRET = process.env.JWT_SECRET
 const DATABASE_URL = process.env.DATABASE_URL
+const JSON_LIMIT = process.env.API_JSON_LIMIT ?? '256kb'
+
+function getAllowedOrigins(): Set<string> {
+  const allowed = new Set<string>()
+  const frontendUrl = process.env.FRONTEND_URL?.trim()
+  if (frontendUrl) {
+    allowed.add(frontendUrl)
+  }
+
+  const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+  for (const origin of configuredOrigins) {
+    allowed.add(origin)
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    allowed.add('http://localhost:5173')
+    allowed.add('http://127.0.0.1:5173')
+  }
+
+  return allowed
+}
 
 function assertRuntimeConfig(): void {
   if (!DATABASE_URL) {
@@ -30,16 +54,34 @@ function assertRuntimeConfig(): void {
   if (!JWT_SECRET) {
     throw new Error('JWT_SECRET is required')
   }
-  if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'change_me_in_production') {
-    throw new Error('JWT_SECRET must be changed in production')
+  if (process.env.NODE_ENV !== 'development' && JWT_SECRET === 'change_me_in_production') {
+    throw new Error('JWT_SECRET must be changed outside development')
   }
   if ((process.env.PLACES_PROVIDER ?? 'local').toLowerCase() === 'google' && !process.env.GOOGLE_MAPS_API_KEY) {
     throw new Error('GOOGLE_MAPS_API_KEY is required when PLACES_PROVIDER=google')
   }
 }
 
-app.use(cors())
-app.use(express.json())
+const allowedOrigins = getAllowedOrigins()
+
+app.disable('x-powered-by')
+app.use((_, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('Referrer-Policy', 'no-referrer')
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+  next()
+})
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.has(origin)) {
+      callback(null, true)
+      return
+    }
+    callback(new Error('Origin not allowed by CORS'))
+  },
+}))
+app.use(express.json({ limit: JSON_LIMIT }))
 
 app.use('/health', healthRouter)
 app.use('/api/auth', authRouter)
@@ -57,6 +99,10 @@ app.use('/api/*', (_req, res) => {
 })
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof Error && err.message.includes('CORS')) {
+    res.status(403).json({ error: 'Origin not allowed' })
+    return
+  }
   console.error('Unhandled API error:', err)
   res.status(500).json({ error: 'Internal server error' })
 })

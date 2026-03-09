@@ -11,13 +11,23 @@ adminRouter.use(requireAuth, requireAdmin)
 
 // GET /api/admin/stats — dashboard stats
 adminRouter.get('/stats', async (_req, res) => {
-  const [[{ totalUsers }], [{ totalPlaces }], [{ totalReviews }], [{ totalSaves }], [{ totalVisits }]] =
+  const [
+    [{ totalUsers }],
+    [{ totalPlaces }],
+    [{ totalReviews }],
+    [{ totalSaves }],
+    [{ totalVisits }],
+    [{ openReviewReports }],
+    [{ deactivatedUsers }],
+  ] =
     await Promise.all([
       db.select({ totalUsers: count() }).from(users),
       db.select({ totalPlaces: count() }).from(places),
       db.select({ totalReviews: count() }).from(reviews),
       db.select({ totalSaves: count() }).from(saves),
       db.select({ totalVisits: count() }).from(visits),
+      db.select({ openReviewReports: count() }).from(reviewReports).where(eq(reviewReports.status, 'open')),
+      db.select({ deactivatedUsers: count() }).from(users).where(eq(users.isActive, false)),
     ])
 
   const recentReviews = await db.query.reviews.findMany({
@@ -32,6 +42,8 @@ adminRouter.get('/stats', async (_req, res) => {
     totalReviews: Number(totalReviews),
     totalSaves: Number(totalSaves),
     totalVisits: Number(totalVisits),
+    openReviewReports: Number(openReviewReports),
+    deactivatedUsers: Number(deactivatedUsers),
     recentReviews: recentReviews.map((r) => ({
       id: r.id,
       rating: r.rating,
@@ -41,6 +53,45 @@ adminRouter.get('/stats', async (_req, res) => {
       place: { id: r.place.id, name: r.place.name },
     })),
   })
+})
+
+// GET /api/admin/leaderboard?limit=10 - operational ranking of power users
+adminRouter.get('/leaderboard', async (req, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '10'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 25) : 10
+
+  const rows = await db
+    .select({
+      userId: users.id,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      reviews: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('reviews'),
+      visits: sql<number>`(select count(*) from visits v where v.user_id = ${users.id})`.as('visits'),
+      saves: sql<number>`(select count(*) from saves s where s.user_id = ${users.id})`.as('saves'),
+      followers: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('followers'),
+    })
+    .from(users)
+    .where(eq(users.isActive, true))
+    .orderBy(
+      desc(sql`(select count(*) from reviews r where r.user_id = ${users.id})`),
+      desc(sql`(select count(*) from saves s where s.user_id = ${users.id})`),
+      desc(sql`(select count(*) from follows f where f.following_id = ${users.id})`),
+      desc(sql`(select count(*) from visits v where v.user_id = ${users.id})`),
+      desc(users.createdAt),
+    )
+    .limit(limit)
+
+  res.json(
+    rows.map((row) => ({
+      userId: row.userId,
+      displayName: row.displayName,
+      avatarUrl: row.avatarUrl,
+      reviews: Number(row.reviews),
+      visits: Number(row.visits),
+      saves: Number(row.saves),
+      followers: Number(row.followers),
+    })),
+  )
 })
 
 // GET /api/admin/insights — ranked operational insights
@@ -192,37 +243,53 @@ adminRouter.delete('/users/:id', async (req: AuthRequest, res) => {
   res.status(204).send()
 })
 
-// GET /api/admin/places — all places with stats
-adminRouter.get('/places', async (_req, res) => {
-  const allPlaces = await db
-    .select({
-      id: places.id,
-      name: places.name,
-      cuisine: places.cuisine,
-      address: places.address,
-      latitude: places.latitude,
-      longitude: places.longitude,
-      priceLevel: places.priceLevel,
-      imageUrl: places.imageUrl,
-      createdAt: places.createdAt,
-      avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`.as('avg_rating'),
-      reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
-      saveCount: sql<number>`COUNT(DISTINCT ${saves.id})`.as('save_count'),
-    })
-    .from(places)
-    .leftJoin(reviews, eq(reviews.placeId, places.id))
-    .leftJoin(saves, eq(saves.placeId, places.id))
-    .groupBy(places.id)
-    .orderBy(desc(places.createdAt))
+// GET /api/admin/places?limit=25&offset=0 — paginated places with stats
+adminRouter.get('/places', async (req, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '25'), 10)
+  const offsetRaw = Number.parseInt(String(req.query.offset ?? '0'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 25
+  const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0
 
-  res.json(
-    allPlaces.map((place) => ({
+  const [allPlaces, [{ total }]] = await Promise.all([
+    db
+      .select({
+        id: places.id,
+        name: places.name,
+        cuisine: places.cuisine,
+        address: places.address,
+        latitude: places.latitude,
+        longitude: places.longitude,
+        priceLevel: places.priceLevel,
+        imageUrl: places.imageUrl,
+        createdAt: places.createdAt,
+        avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`.as('avg_rating'),
+        reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
+        saveCount: sql<number>`COUNT(DISTINCT ${saves.id})`.as('save_count'),
+      })
+      .from(places)
+      .leftJoin(reviews, eq(reviews.placeId, places.id))
+      .leftJoin(saves, eq(saves.placeId, places.id))
+      .groupBy(places.id)
+      .orderBy(desc(places.createdAt))
+      .limit(limit)
+      .offset(offset),
+    db.select({ total: count() }).from(places),
+  ])
+
+  res.json({
+    data: allPlaces.map((place) => ({
       ...place,
       avgRating: Number(place.avgRating),
       reviewCount: Number(place.reviewCount),
       saveCount: Number(place.saveCount),
     })),
-  )
+    pagination: {
+      total: Number(total),
+      limit,
+      offset,
+      hasMore: offset + limit < Number(total),
+    },
+  })
 })
 
 // DELETE /api/admin/places/:id

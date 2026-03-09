@@ -12,7 +12,10 @@ export type Place = {
   reviewCount: number
   imageUrl?: string | null
   isSaved?: boolean
+  priceLevel?: number | null
 }
+
+const PRICE_LABELS: Record<number, string> = { 1: '$', 2: '$$', 3: '$$$', 4: '$$$$' }
 
 const GRADIENTS = [
   'from-slate-700 to-slate-900',
@@ -123,11 +126,18 @@ export default function PlaceCard({ place, showVisitedBadge, visitedDate, onSave
           <h3 className="font-semibold text-slate-900 text-sm leading-snug group-hover:text-orange-500 transition-colors">
             {place.name}
           </h3>
-          {place.cuisine && (
-            <span className="inline-block mt-1 text-xs font-medium text-orange-500 bg-orange-50 rounded-full px-2.5 py-0.5">
-              {place.cuisine}
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            {place.cuisine && (
+              <span className="text-xs font-medium text-orange-500 bg-orange-50 rounded-full px-2.5 py-0.5">
+                {place.cuisine}
+              </span>
+            )}
+            {place.priceLevel && PRICE_LABELS[place.priceLevel] && (
+              <span className="text-xs font-medium text-emerald-600 bg-emerald-50 rounded-full px-2.5 py-0.5">
+                {PRICE_LABELS[place.priceLevel]}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-1 text-xs text-slate-400">

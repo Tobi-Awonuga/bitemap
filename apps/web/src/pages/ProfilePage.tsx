@@ -3,9 +3,14 @@ import { useNavigate, Link } from 'react-router-dom'
 import { Settings, Bookmark, CheckCircle, Star, MapPin, ChevronRight, LogOut, Shield, Loader2, Users, UserPlus } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import UserAvatar from '../components/ui/UserAvatar'
 
-function getInitials(name: string): string {
-  return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
+type MyReview = {
+  id: string
+  rating: number
+  body?: string | null
+  createdAt: string
+  place: { id: string; name: string; cuisine?: string | null }
 }
 
 function formatJoinDate(dateStr: string): string {
@@ -30,6 +35,8 @@ export default function ProfilePage() {
   const [feed, setFeed] = useState<FeedItem[]>([])
   const [feedLoading, setFeedLoading] = useState(true)
   const [tasteProfile, setTasteProfile] = useState<TasteProfile>({ cuisines: [], totalSignals: 0 })
+  const [myReviews, setMyReviews] = useState<MyReview[]>([])
+  const [reviewsLoading, setReviewsLoading] = useState(true)
 
   useEffect(() => {
     if (!user) return
@@ -45,6 +52,16 @@ export default function ProfilePage() {
       .get<{ data: TasteProfile }>('/api/users/me/taste-profile')
       .then((res) => setTasteProfile(res.data))
       .catch(() => setTasteProfile({ cuisines: [], totalSignals: 0 }))
+  }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    setReviewsLoading(true)
+    api
+      .get<{ data: MyReview[] }>('/api/users/me/reviews')
+      .then((res) => setMyReviews(res.data))
+      .catch(() => setMyReviews([]))
+      .finally(() => setReviewsLoading(false))
   }, [user])
 
   useEffect(() => {
@@ -65,11 +82,11 @@ export default function ProfilePage() {
   if (!user) return null
 
   const statCards = [
-    { label: 'Followers', value: stats.followers, icon: Users },
-    { label: 'Following', value: stats.following, icon: UserPlus },
-    { label: 'Saved', value: stats.saves, icon: Bookmark },
-    { label: 'Visited', value: stats.visits, icon: CheckCircle },
-    { label: 'Reviews', value: stats.reviews, icon: Star },
+    { label: 'Followers', value: stats.followers, icon: Users, to: `/profile/followers` },
+    { label: 'Following', value: stats.following, icon: UserPlus, to: `/profile/following` },
+    { label: 'Saved', value: stats.saves, icon: Bookmark, to: null },
+    { label: 'Visited', value: stats.visits, icon: CheckCircle, to: null },
+    { label: 'Reviews', value: stats.reviews, icon: Star, to: null },
   ]
 
   return (
@@ -78,9 +95,7 @@ export default function ProfilePage() {
       <div className="bg-white rounded-2xl shadow-sm p-6">
         <div className="flex items-start justify-between mb-6">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center shadow-sm">
-              <span className="text-white font-bold text-xl">{getInitials(user.displayName)}</span>
-            </div>
+            <UserAvatar name={user.displayName} avatarUrl={user.avatarUrl} className="w-16 h-16 rounded-2xl shadow-sm" textClassName="text-xl" />
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold text-slate-900">{user.displayName}</h1>
@@ -106,13 +121,28 @@ export default function ProfilePage() {
 
         {/* Stats */}
         <div className="grid grid-cols-5 gap-3">
-          {statCards.map(({ label, value, icon: Icon }) => (
-            <div key={label} className="bg-slate-50 rounded-xl p-3 text-center">
-              <Icon className="w-4 h-4 text-orange-500 mx-auto mb-1" />
-              <p className="text-xl font-bold text-slate-900">{value}</p>
-              <p className="text-xs text-slate-500">{label}</p>
-            </div>
-          ))}
+          {statCards.map(({ label, value, icon: Icon, to }) => {
+            const inner = (
+              <>
+                <Icon className="w-4 h-4 text-orange-500 mx-auto mb-1" />
+                <p className="text-xl font-bold text-slate-900">{value}</p>
+                <p className="text-xs text-slate-500">{label}</p>
+              </>
+            )
+            return to ? (
+              <Link
+                key={label}
+                to={to}
+                className="bg-slate-50 hover:ring-2 hover:ring-orange-200 rounded-xl p-3 text-center transition-all cursor-pointer block"
+              >
+                {inner}
+              </Link>
+            ) : (
+              <div key={label} className="bg-slate-50 rounded-xl p-3 text-center">
+                {inner}
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -160,6 +190,49 @@ export default function ProfilePage() {
               <span key={item.cuisine} className="inline-flex items-center gap-1 text-xs bg-orange-50 text-orange-600 rounded-full px-3 py-1">
                 {item.cuisine}
               </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm p-6">
+        <h2 className="text-base font-bold text-slate-900 mb-4">Your reviews</h2>
+        {reviewsLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading reviews...
+          </div>
+        ) : myReviews.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            You haven't written any reviews yet.{' '}
+            <Link to="/discover" className="text-orange-500 hover:text-orange-600 font-medium">
+              Discover places →
+            </Link>
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {myReviews.slice(0, 10).map((review) => (
+              <div key={review.id} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
+                <div className="flex items-start justify-between gap-2">
+                  <Link
+                    to={`/places/${review.place.id}`}
+                    className="text-sm font-semibold text-slate-900 hover:text-orange-600"
+                  >
+                    {review.place.name}
+                  </Link>
+                  <span className="text-xs text-amber-500 font-semibold shrink-0">
+                    {'★'.repeat(Math.round(review.rating))} {review.rating.toFixed(1)}
+                  </span>
+                </div>
+                {review.body && (
+                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                    {review.body.length > 100 ? `${review.body.slice(0, 100)}…` : review.body}
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {new Date(review.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </p>
+              </div>
             ))}
           </div>
         )}

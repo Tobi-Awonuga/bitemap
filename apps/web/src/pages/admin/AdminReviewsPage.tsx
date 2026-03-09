@@ -37,26 +37,36 @@ export default function AdminReviewsPage() {
   const [reviews, setReviews] = useState<AdminReview[]>([])
   const [reports, setReports] = useState<AdminReviewReport[]>([])
   const [loading, setLoading] = useState(true)
+  const [reportsLoading, setReportsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [moderatingReportId, setModeratingReportId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'reviews' | 'reports'>('reviews')
+  const [reportFilter, setReportFilter] = useState<'open' | 'resolved' | 'dismissed'>('open')
 
   useEffect(() => {
-    Promise.all([
-      api.get<AdminReview[]>('/api/admin/reviews'),
-      api.get<AdminReviewReport[]>('/api/admin/review-reports?status=open'),
-    ])
-      .then(([allReviews, openReports]) => {
-        setReviews(allReviews)
-        setReports(openReports)
-      })
+    api
+      .get<AdminReview[]>('/api/admin/reviews')
+      .then(setReviews)
       .catch((err) => {
         setReviews([])
-        setReports([])
         setError(err instanceof Error ? err.message : 'Failed to load reviews')
       })
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'reports') return
+    setReportsLoading(true)
+    api
+      .get<AdminReviewReport[]>(`/api/admin/review-reports?status=${reportFilter}`)
+      .then(setReports)
+      .catch((err) => {
+        setReports([])
+        setError(err instanceof Error ? err.message : 'Failed to load reports')
+      })
+      .finally(() => setReportsLoading(false))
+  }, [activeTab, reportFilter])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Remove this review?')) return
@@ -91,9 +101,28 @@ export default function AdminReviewsPage() {
         <h1 className="text-2xl font-bold text-white">Reviews</h1>
         <p className="text-slate-400 text-sm mt-1">{reviews.length} reviews total</p>
       </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 bg-slate-800 border border-slate-700 rounded-xl p-1 w-fit">
+        {(['reviews', 'reports'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === tab
+                ? 'bg-orange-500 text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {tab === 'reviews' ? 'All Reviews' : 'Reports'}
+          </button>
+        ))}
+      </div>
+
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      {loading ? (
+      {activeTab === 'reviews' && (
+        loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
         </div>
@@ -153,51 +182,85 @@ export default function AdminReviewsPage() {
             ))}
           </div>
         </div>
+      )
       )}
 
-      {!loading && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-amber-400" />
-            <h2 className="text-sm font-semibold text-white">Open Review Reports</h2>
-            <span className="text-xs text-slate-400">{reports.length}</span>
+      {activeTab === 'reports' && (
+        <div className="space-y-4">
+          {/* Report status filter */}
+          <div className="flex items-center gap-1">
+            {(['open', 'resolved', 'dismissed'] as const).map((status) => (
+              <button
+                key={status}
+                onClick={() => setReportFilter(status)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${
+                  reportFilter === status
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-slate-800 border border-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                {status}
+              </button>
+            ))}
           </div>
-          {reports.length === 0 ? (
-            <p className="text-xs text-slate-400">No open review reports.</p>
+
+          {reportsLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+            </div>
+          ) : reports.length === 0 ? (
+            <p className="text-sm text-slate-400 py-8 text-center">No {reportFilter} reports.</p>
           ) : (
             <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden divide-y divide-slate-700">
               {reports.map((report) => (
                 <div key={report.id} className="px-5 py-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 space-y-1">
-                      <p className="text-xs text-amber-400 font-medium uppercase tracking-wide">{report.reason}</p>
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-xs text-amber-400 font-semibold uppercase tracking-wide">{report.reason}</span>
+                        <span className="text-xs text-slate-500">{formatDate(report.createdAt)}</span>
+                      </div>
                       <p className="text-sm text-slate-300">
-                        Reported by <span className="font-semibold">{report.reporter.displayName}</span> on{' '}
+                        Reported by <span className="font-semibold">{report.reporter.displayName}</span> ({report.reporter.email}) on{' '}
                         <Link to={`/places/${report.review.place.id}`} className="text-orange-400 hover:text-orange-300">
                           {report.review.place.name}
                         </Link>
                       </p>
-                      {report.details && <p className="text-xs text-slate-400">{report.details}</p>}
-                      {report.review.body && <p className="text-sm text-slate-200 italic">"{report.review.body}"</p>}
+                      {report.details && <p className="text-xs text-slate-400">Details: {report.details}</p>}
+                      {report.review.body && (
+                        <p className="text-sm text-slate-200 italic bg-slate-700/50 rounded-lg px-3 py-2 mt-1">
+                          "{report.review.body}"
+                        </p>
+                      )}
+                      <p className="text-xs text-slate-500">
+                        By {report.review.user.displayName} · {report.review.rating}★
+                      </p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => handleReportDecision(report.id, 'resolved')}
-                        disabled={moderatingReportId === report.id}
-                        className="inline-flex items-center gap-1 text-xs text-emerald-300 hover:text-emerald-200 disabled:opacity-60"
-                      >
-                        {moderatingReportId === report.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                        Resolve
-                      </button>
-                      <button
-                        onClick={() => handleReportDecision(report.id, 'dismissed')}
-                        disabled={moderatingReportId === report.id}
-                        className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white disabled:opacity-60"
-                      >
-                        <XCircle className="w-3 h-3" />
-                        Dismiss
-                      </button>
-                    </div>
+                    {reportFilter === 'open' && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => handleReportDecision(report.id, 'resolved')}
+                          disabled={moderatingReportId === report.id}
+                          className="inline-flex items-center gap-1 text-xs text-emerald-300 hover:text-emerald-200 disabled:opacity-60 bg-emerald-500/10 px-2.5 py-1.5 rounded-lg"
+                        >
+                          {moderatingReportId === report.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3 h-3" />
+                          )}
+                          Resolve
+                        </button>
+                        <button
+                          onClick={() => handleReportDecision(report.id, 'dismissed')}
+                          disabled={moderatingReportId === report.id}
+                          className="inline-flex items-center gap-1 text-xs text-slate-300 hover:text-white disabled:opacity-60 bg-slate-700 px-2.5 py-1.5 rounded-lg"
+                        >
+                          <XCircle className="w-3 h-3" />
+                          Dismiss
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

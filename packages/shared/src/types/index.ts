@@ -84,6 +84,8 @@ export interface AdminStats {
   totalReviews: number
   totalSaves: number
   totalVisits: number
+  openReviewReports: number
+  deactivatedUsers: number
   recentReviews: Array<{
     id: string
     rating: number
@@ -92,6 +94,16 @@ export interface AdminStats {
     user: { id: string; displayName: string }
     place: { id: string; name: string }
   }>
+}
+
+export interface UserLeaderboardEntry {
+  userId: string
+  displayName: string
+  avatarUrl?: string | null
+  reviews: number
+  visits: number
+  saves: number
+  followers: number
 }
 
 export interface AdminInsights {

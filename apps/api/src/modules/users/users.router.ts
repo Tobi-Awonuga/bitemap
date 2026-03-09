@@ -1,12 +1,43 @@
 import { Router } from 'express'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { z } from 'zod'
+import bcrypt from 'bcryptjs'
 import { db } from '../../db'
 import { follows, places, reviews, saves, users, visits } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
 import { createNotification } from '../notifications/notifications.service'
+import { profileUpdateSchema } from '@bitemap/shared'
 
 export const usersRouter = Router()
 const GOOGLE_PHOTO_PREFIX = 'gphoto:'
+
+// Rate limiting for change-password
+type AttemptRecord = { count: number; resetAt: number }
+const changePwAttempts = new Map<string, AttemptRecord>()
+const CHANGE_PW_WINDOW_MS = 15 * 60 * 1000
+const CHANGE_PW_MAX_ATTEMPTS = 5
+
+function canChangePassword(userId: string): boolean {
+  const now = Date.now()
+  const record = changePwAttempts.get(userId)
+  if (!record || record.resetAt <= now) {
+    changePwAttempts.set(userId, { count: 1, resetAt: now + CHANGE_PW_WINDOW_MS })
+    return true
+  }
+  if (record.count >= CHANGE_PW_MAX_ATTEMPTS) return false
+  record.count++
+  return true
+}
+
+const changePwSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Must contain an uppercase letter')
+    .regex(/[a-z]/, 'Must contain a lowercase letter')
+    .regex(/[0-9]/, 'Must contain a number'),
+})
 
 function serializeImageUrl(placeId: string, imageUrl: string | null): string | null {
   if (!imageUrl) return null
@@ -120,6 +151,7 @@ type PlaceStatsRow = {
   cuisine: string | null
   address: string
   imageUrl: string | null
+  priceLevel: number | null
   avgRating: number
   reviewCount: number
 }
@@ -132,6 +164,7 @@ async function getPlaceStats(limit = 300): Promise<PlaceStatsRow[]> {
       cuisine: places.cuisine,
       address: places.address,
       imageUrl: places.imageUrl,
+      priceLevel: places.priceLevel,
       avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`.as('avg_rating'),
       reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
     })
@@ -147,6 +180,84 @@ async function getPlaceStats(limit = 300): Promise<PlaceStatsRow[]> {
     avgRating: Number(row.avgRating),
     reviewCount: Number(row.reviewCount),
   }))
+}
+
+type LeaderboardRow = {
+  userId: string
+  displayName: string
+  avatarUrl: string | null
+  reviews: number
+  visits: number
+  saves: number
+  followers: number
+}
+
+async function getUserLeaderboard(limit = 10): Promise<LeaderboardRow[]> {
+  const boundedLimit = Math.min(Math.max(limit, 1), 25)
+  const rows = await db
+    .select({
+      userId: users.id,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      reviews: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('reviews'),
+      visits: sql<number>`(select count(*) from visits v where v.user_id = ${users.id})`.as('visits'),
+      saves: sql<number>`(select count(*) from saves s where s.user_id = ${users.id})`.as('saves'),
+      followers: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('followers'),
+    })
+    .from(users)
+    .where(eq(users.isActive, true))
+    .orderBy(
+      desc(sql`(select count(*) from reviews r where r.user_id = ${users.id})`),
+      desc(sql`(select count(*) from saves s where s.user_id = ${users.id})`),
+      desc(sql`(select count(*) from follows f where f.following_id = ${users.id})`),
+      desc(sql`(select count(*) from visits v where v.user_id = ${users.id})`),
+      desc(users.createdAt),
+    )
+    .limit(boundedLimit)
+
+  return rows.map((row) => ({
+    userId: row.userId,
+    displayName: row.displayName,
+    avatarUrl: row.avatarUrl,
+    reviews: Number(row.reviews),
+    visits: Number(row.visits),
+    saves: Number(row.saves),
+    followers: Number(row.followers),
+  }))
+}
+
+function normalizeCity(raw: string | undefined): string | null {
+  if (!raw) return null
+  const cleaned = raw.trim()
+  if (!cleaned) return null
+  return cleaned.slice(0, 80)
+}
+
+function cityFilterSql(city: string | null) {
+  if (!city) return sql`true`
+  return sql`(
+    exists (
+      select 1
+      from reviews r
+      inner join places p on p.id = r.place_id
+      where r.user_id = ${users.id}
+        and lower(p.address) like lower(${`%${city}%`})
+    )
+    or exists (
+      select 1
+      from visits v
+      inner join places p on p.id = v.place_id
+      where v.user_id = ${users.id}
+        and lower(p.address) like lower(${`%${city}%`})
+    )
+    or exists (
+      select 1
+      from saves s
+      inner join places p on p.id = s.place_id
+      where s.user_id = ${users.id}
+        and lower(p.address) like lower(${`%${city}%`})
+    )
+  )`
 }
 
 // GET /api/users/me
@@ -387,6 +498,108 @@ usersRouter.get('/suggestions', requireAuth, async (req: AuthRequest, res) => {
   res.json({ data: suggestions })
 })
 
+// GET /api/users/leaderboard?limit=10 - ranked community users
+usersRouter.get('/leaderboard', requireAuth, async (req: AuthRequest, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '10'), 10)
+  const limit = Number.isFinite(limitRaw) ? limitRaw : 10
+  const city = normalizeCity(typeof req.query.city === 'string' ? req.query.city : undefined)
+  const boundedLimit = Math.min(Math.max(limit, 1), 25)
+  const filter = cityFilterSql(city)
+
+  const rows = await db
+    .select({
+      userId: users.id,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      reviews: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('reviews'),
+      visits: sql<number>`(select count(*) from visits v where v.user_id = ${users.id})`.as('visits'),
+      saves: sql<number>`(select count(*) from saves s where s.user_id = ${users.id})`.as('saves'),
+      followers: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('followers'),
+    })
+    .from(users)
+    .where(and(eq(users.isActive, true), filter))
+    .orderBy(
+      desc(sql`(select count(*) from reviews r where r.user_id = ${users.id})`),
+      desc(sql`(select count(*) from saves s where s.user_id = ${users.id})`),
+      desc(sql`(select count(*) from follows f where f.following_id = ${users.id})`),
+      desc(sql`(select count(*) from visits v where v.user_id = ${users.id})`),
+      desc(users.createdAt),
+    )
+    .limit(boundedLimit)
+
+  const leaderboard = rows.map((row) => ({
+    userId: row.userId,
+    displayName: row.displayName,
+    avatarUrl: row.avatarUrl,
+    reviews: Number(row.reviews),
+    visits: Number(row.visits),
+    saves: Number(row.saves),
+    followers: Number(row.followers),
+  }))
+
+  res.json({ data: leaderboard })
+})
+
+// GET /api/users/:id/followers?limit=20&offset=0 - follower list with pagination
+usersRouter.get('/:id/followers', requireAuth, async (req: AuthRequest, res) => {
+  const targetUserId = String(req.params.id)
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '20'), 10)
+  const offsetRaw = Number.parseInt(String(req.query.offset ?? '0'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 20
+  const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0
+
+  const [rows, [{ total }]] = await Promise.all([
+    db.query.follows.findMany({
+      where: eq(follows.followingId, targetUserId),
+      with: {
+        follower: { columns: { id: true, displayName: true, avatarUrl: true, role: true } },
+      },
+      orderBy: (table) => [desc(table.createdAt)],
+      limit,
+      offset,
+    }),
+    db
+      .select({ total: sql<number>`count(*)` })
+      .from(follows)
+      .where(eq(follows.followingId, targetUserId)),
+  ])
+
+  res.json({
+    data: rows.map((row) => row.follower),
+    pagination: { total: Number(total ?? 0), limit, offset },
+  })
+})
+
+// GET /api/users/:id/following?limit=20&offset=0 - following list with pagination
+usersRouter.get('/:id/following', requireAuth, async (req: AuthRequest, res) => {
+  const targetUserId = String(req.params.id)
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '20'), 10)
+  const offsetRaw = Number.parseInt(String(req.query.offset ?? '0'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 20
+  const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0
+
+  const [rows, [{ total }]] = await Promise.all([
+    db.query.follows.findMany({
+      where: eq(follows.followerId, targetUserId),
+      with: {
+        following: { columns: { id: true, displayName: true, avatarUrl: true, role: true } },
+      },
+      orderBy: (table) => [desc(table.createdAt)],
+      limit,
+      offset,
+    }),
+    db
+      .select({ total: sql<number>`count(*)` })
+      .from(follows)
+      .where(eq(follows.followerId, targetUserId)),
+  ])
+
+  res.json({
+    data: rows.map((row) => row.following),
+    pagination: { total: Number(total ?? 0), limit, offset },
+  })
+})
+
 // GET /api/users/:id/match - cosine similarity taste match with current user
 usersRouter.get('/:id/match', requireAuth, async (req: AuthRequest, res) => {
   const targetUserId = String(req.params.id)
@@ -466,9 +679,37 @@ usersRouter.get('/:id', requireAuth, async (req: AuthRequest, res) => {
   })
 })
 
+// GET /api/users/me/reviews - current user's own reviews
+usersRouter.get('/me/reviews', requireAuth, async (req: AuthRequest, res) => {
+  const myReviews = await db.query.reviews.findMany({
+    where: eq(reviews.userId, req.user!.id),
+    with: {
+      place: { columns: { id: true, name: true, cuisine: true } },
+    },
+    orderBy: (table) => [desc(table.createdAt)],
+    limit: 50,
+  })
+
+  res.json({
+    data: myReviews.map((row) => ({
+      id: row.id,
+      rating: row.rating,
+      body: row.body,
+      createdAt: row.createdAt,
+      place: row.place,
+    })),
+  })
+})
+
 // PATCH /api/users/me
 usersRouter.patch('/me', requireAuth, async (req: AuthRequest, res) => {
-  const { displayName, avatarUrl } = req.body
+  const parsed = profileUpdateSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten().fieldErrors })
+    return
+  }
+
+  const { displayName, avatarUrl } = parsed.data
 
   const [updated] = await db
     .update(users)
@@ -487,6 +728,43 @@ usersRouter.patch('/me', requireAuth, async (req: AuthRequest, res) => {
     })
 
   res.json({ data: updated })
+})
+
+// PATCH /api/users/me/password - change password while authenticated
+usersRouter.patch('/me/password', requireAuth, async (req: AuthRequest, res) => {
+  if (!canChangePassword(req.user!.id)) {
+    res.status(429).json({ error: 'Too many attempts. Please try again later.' })
+    return
+  }
+
+  const parsed = changePwSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten().fieldErrors })
+    return
+  }
+
+  const { currentPassword, newPassword } = parsed.data
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, req.user!.id),
+    columns: { id: true, passwordHash: true },
+  })
+
+  if (!user) {
+    res.status(404).json({ error: 'User not found' })
+    return
+  }
+
+  const passwordMatch = await bcrypt.compare(currentPassword, user.passwordHash)
+  if (!passwordMatch) {
+    res.status(400).json({ error: 'Current password is incorrect' })
+    return
+  }
+
+  const newHash = await bcrypt.hash(newPassword, 12)
+  await db.update(users).set({ passwordHash: newHash }).where(eq(users.id, req.user!.id))
+
+  res.json({ message: 'Password updated' })
 })
 
 // POST /api/users/:id/follow

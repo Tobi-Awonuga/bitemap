@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Search, MapPin, TrendingUp, Sparkles, Loader2, UserPlus } from 'lucide-react'
+import { Search, MapPin, TrendingUp, Sparkles, Loader2, UserPlus, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import PlaceCard, { type Place } from '../components/ui/PlaceCard'
 import { api } from '../lib/api'
 import { useGeolocation } from '../hooks/useGeolocation'
 import { useAuth } from '../context/AuthContext'
+import UserAvatar from '../components/ui/UserAvatar'
 
 const CUISINE_TAGS = [
   'All', 'Italian', 'Japanese', 'Burgers', 'Vegan', 'Indian', 'Brunch', 'Cocktail Bars', 'Fine Dining', 'British',
@@ -35,6 +36,17 @@ type Recommendations = {
   trendingNow: RecommendedPlace[]
 }
 
+type LeaderboardUser = {
+  userId: string
+  displayName: string
+  avatarUrl?: string | null
+  reviews: number
+  visits: number
+  saves: number
+  followers: number
+  score: number
+}
+
 function recommendationReasonFor(place: Place | RecommendedPlace): string | undefined {
   const reason = (place as RecommendedPlace).reason
   return typeof reason === 'string' ? reason : undefined
@@ -49,6 +61,28 @@ function pickUnique(places: Place[], excluded: Set<string>, limit: number): Plac
     if (selected.length >= limit) break
   }
   return selected
+}
+
+function extractCityFromAddress(address: string | undefined): string | null {
+  if (!address) return null
+  const parts = address
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length === 0) return null
+
+  const provinceOrPostal = /^[A-Z]{2}(?:\s+[A-Z]\d[A-Z]\s?\d[A-Z]\d)?$/i
+  const countryTokens = new Set(['canada', 'united states', 'usa'])
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const part = parts[i]
+    const lower = part.toLowerCase()
+    if (countryTokens.has(lower)) continue
+    if (provinceOrPostal.test(part)) continue
+    if (/\d/.test(part)) continue
+    if (part.length < 2) continue
+    return part
+  }
+  return null
 }
 
 export default function HomePage() {
@@ -72,6 +106,8 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeTag, setActiveTag] = useState('All')
+  const [priceFilter, setPriceFilter] = useState<number | null>(null)
+  const [searchSort, setSearchSort] = useState<'relevance' | 'rating' | 'reviews'>('relevance')
   const [followingFeed, setFollowingFeed] = useState<FeedItem[]>(() => {
     try {
       const raw = sessionStorage.getItem(followingCacheKey)
@@ -85,6 +121,8 @@ export default function HomePage() {
   const [suggestions, setSuggestions] = useState<SuggestedUser[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const [followPendingId, setFollowPendingId] = useState<string | null>(null)
+  const [leaderboard, setLeaderboard] = useState<LeaderboardUser[]>([])
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true)
   const [recommendations, setRecommendations] = useState<Recommendations>({
     forYou: [],
     friendsLoved: [],
@@ -128,28 +166,37 @@ export default function HomePage() {
         setSearchQuery('')
         setDebouncedSearch('')
         setActiveTag('All')
+        setPriceFilter(null)
         return
       }
-      const parsed = JSON.parse(raw) as { searchQuery?: string; activeTag?: string }
+      const parsed = JSON.parse(raw) as { searchQuery?: string; activeTag?: string; priceFilter?: number | null }
       const nextSearch = typeof parsed.searchQuery === 'string' ? parsed.searchQuery : ''
       const nextTag = typeof parsed.activeTag === 'string' ? parsed.activeTag : 'All'
+      const nextPriceFilter =
+        parsed.priceFilter === null
+          ? null
+          : Number.isFinite(parsed.priceFilter) && Number(parsed.priceFilter) >= 1 && Number(parsed.priceFilter) <= 4
+            ? Number(parsed.priceFilter)
+            : null
       setSearchQuery(nextSearch)
       setDebouncedSearch(nextSearch.trim())
       setActiveTag(nextTag)
+      setPriceFilter(nextPriceFilter)
     } catch {
       setSearchQuery('')
       setDebouncedSearch('')
       setActiveTag('All')
+      setPriceFilter(null)
     }
   }, [discoverStateKey])
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(discoverStateKey, JSON.stringify({ searchQuery, activeTag }))
+      sessionStorage.setItem(discoverStateKey, JSON.stringify({ searchQuery, activeTag, priceFilter }))
     } catch {
       // ignore storage errors
     }
-  }, [activeTag, discoverStateKey, searchQuery])
+  }, [activeTag, discoverStateKey, priceFilter, searchQuery])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350)
@@ -162,6 +209,7 @@ export default function HomePage() {
     const cuisine = activeTag !== 'All' ? activeTag : ''
     if (query.length >= 2) params.set('q', query)
     else if (cuisine) params.set('q', cuisine)
+    if (priceFilter !== null) params.set('priceLevel', String(priceFilter))
     params.set('limit', '24')
     if (coords) {
       params.set('lat', String(coords.lat))
@@ -169,7 +217,7 @@ export default function HomePage() {
     }
     const endpoint = coords ? '/api/places/nearby' : '/api/places'
     return `${endpoint}?${params}`
-  }, [activeTag, coords, debouncedSearch])
+  }, [activeTag, coords, debouncedSearch, priceFilter])
 
   const fetchPlaces = useCallback(async (url: string) => {
     const requestId = ++requestIdRef.current
@@ -230,6 +278,28 @@ export default function HomePage() {
       .finally(() => setSuggestionsLoading(false))
   }, [user?.id])
 
+  const activeCity = useMemo(() => {
+    const fromRecommendations = [recommendations.forYou, recommendations.trendingNow, recommendations.friendsLoved]
+      .flat()
+      .map((place) => extractCityFromAddress(place.address))
+      .find((city): city is string => !!city)
+    if (fromRecommendations) return fromRecommendations
+    return places
+      .map((place) => extractCityFromAddress(place.address))
+      .find((city): city is string => !!city) ?? null
+  }, [places, recommendations])
+
+  useEffect(() => {
+    setLeaderboardLoading(true)
+    const params = new URLSearchParams({ limit: '5' })
+    if (activeCity) params.set('city', activeCity)
+    api
+      .get<{ data: LeaderboardUser[] }>(`/api/users/leaderboard?${params.toString()}`)
+      .then((res) => setLeaderboard(res.data))
+      .catch(() => setLeaderboard([]))
+      .finally(() => setLeaderboardLoading(false))
+  }, [activeCity, user?.id])
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     setDebouncedSearch(searchQuery.trim())
@@ -285,9 +355,20 @@ export default function HomePage() {
       .slice(0, 6)
   }, [followingFeed])
 
-  const forYouPlaces = recommendations.forYou.length > 0 ? recommendations.forYou : curated.topRated
-  const trendingPlaces = recommendations.trendingNow.length > 0 ? recommendations.trendingNow : curated.trending
-  const friendsLovedPlaces = recommendations.friendsLoved.length > 0 ? recommendations.friendsLoved : followingPicks
+  const applyPriceFilter = <T extends Place>(arr: T[]): T[] =>
+    priceFilter === null ? arr : arr.filter((p) => p.priceLevel != null && Number(p.priceLevel) === priceFilter)
+
+  const sortSearchResults = (arr: Place[]): Place[] => {
+    if (searchSort === 'rating') return [...arr].sort((a, b) => b.avgRating - a.avgRating)
+    if (searchSort === 'reviews') return [...arr].sort((a, b) => b.reviewCount - a.reviewCount)
+    return arr
+  }
+
+  const forYouPlaces = applyPriceFilter(recommendations.forYou.length > 0 ? recommendations.forYou : curated.topRated)
+  const trendingPlaces = applyPriceFilter(recommendations.trendingNow.length > 0 ? recommendations.trendingNow : curated.trending)
+  const friendsLovedPlaces = applyPriceFilter(recommendations.friendsLoved.length > 0 ? recommendations.friendsLoved : followingPicks)
+  const nearYouPlaces = applyPriceFilter(curated.nearYou)
+  const searchResults = debouncedSearch ? sortSearchResults(applyPriceFilter(places)) : []
 
   const locationLabel = useMemo(() => {
     if (coords) return 'Near you'
@@ -353,6 +434,24 @@ export default function HomePage() {
             </button>
           ))}
         </div>
+
+        {/* Price level filter */}
+        <div className="flex items-center gap-2 mt-3 overflow-x-auto scrollbar-hide pb-1">
+          <span className="text-xs text-slate-400 shrink-0">Price:</span>
+          {([null, 1, 2, 3, 4] as Array<number | null>).map((level) => (
+            <button
+              key={level ?? 'all'}
+              onClick={() => setPriceFilter(level)}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                priceFilter === level
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:border-orange-300 hover:text-orange-500'
+              }`}
+            >
+              {level === null ? 'Any' : ['$', '$$', '$$$', '$$$$'][level - 1]}
+            </button>
+          ))}
+        </div>
       </section>
 
       {loading ? (
@@ -370,46 +469,62 @@ export default function HomePage() {
           </p>
         </div>
       ) : (
-        <>
-          {/* Near you */}
-          <section>
-            <div className="flex items-center justify-between mb-5">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-orange-500" />
-                <h2 className="text-lg font-bold text-slate-900">Near You</h2>
-              </div>
-              <span className="text-sm text-slate-400">
-                {refreshing ? 'Refreshing...' : `${places.length} places`}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {curated.nearYou.map((place) => (
-                <PlaceCard key={place.id} place={place} />
-              ))}
-            </div>
-          </section>
-
-          {/* Trending */}
-          {trendingPlaces.length > 0 && (
+        <div className="space-y-12">
+          {/* Search results mode */}
+          {debouncedSearch && (
             <section>
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-slate-900">Trending Now</h2>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Results
+                  {searchResults.length > 0 && (
+                    <span className="text-slate-400 font-normal ml-2 text-base">({searchResults.length})</span>
+                  )}
+                </h2>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-400 mr-1">Sort:</span>
+                  {(['relevance', 'rating', 'reviews'] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      onClick={() => setSearchSort(opt)}
+                      className={`text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
+                        searchSort === opt ? 'bg-orange-500 text-white' : 'text-slate-500 hover:text-orange-500'
+                      }`}
+                    >
+                      {opt === 'relevance' ? 'Relevance' : opt === 'rating' ? 'Rating' : 'Most Reviewed'}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {trendingPlaces.map((place) => (
-                  <PlaceCard key={place.id} place={place} recommendationReason={recommendationReasonFor(place)} />
-                ))}
-              </div>
+              {searchResults.length === 0 ? (
+                <p className="text-sm text-slate-500 py-10 text-center">No places match your search.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {searchResults.map((place) => (
+                    <PlaceCard key={place.id} place={place} />
+                  ))}
+                </div>
+              )}
             </section>
           )}
 
-          {/* Top rated */}
-          {forYouPlaces.length > 0 && (
+          {/* Price filter notice */}
+          {!debouncedSearch && priceFilter !== null && forYouPlaces.length === 0 && trendingPlaces.length === 0 && nearYouPlaces.length === 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-center justify-between">
+              <p className="text-sm text-amber-800">
+                No places tagged with this price level yet. Admins can set price levels when editing a place.
+              </p>
+              <button onClick={() => setPriceFilter(null)} className="text-xs font-semibold text-amber-700 hover:text-amber-900 shrink-0 ml-4">
+                Clear filter
+              </button>
+            </div>
+          )}
+
+          {!debouncedSearch && forYouPlaces.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-slate-900">For You</h2>
+                <h2 className="text-xl font-bold text-slate-900">For You</h2>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                 {forYouPlaces.map((place) => (
                   <PlaceCard key={place.id} place={place} recommendationReason={recommendationReasonFor(place)} />
                 ))}
@@ -417,13 +532,104 @@ export default function HomePage() {
             </section>
           )}
 
-          {/* Following picks */}
-          {friendsLovedPlaces.length > 0 && (
+          {!debouncedSearch && trendingPlaces.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-slate-900">From People You Follow</h2>
+                <h2 className="text-xl font-bold text-slate-900">Trending Now</h2>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                {trendingPlaces.map((place) => (
+                  <PlaceCard key={place.id} place={place} recommendationReason={recommendationReasonFor(place)} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Leaderboard strip — full width, horizontal */}
+          {!debouncedSearch && (
+            <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-amber-500" />
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Top Foodies{activeCity ? ` in ${activeCity}` : ''}
+                  </h2>
+                </div>
+                <Link to="/leaderboard" className="text-xs text-orange-500 hover:text-orange-600 font-semibold">
+                  Full leaderboard →
+                </Link>
+              </div>
+              {leaderboardLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+                </div>
+              ) : leaderboard.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center px-4 py-8">
+                  No rankings yet — write the first review to claim the top spot!
+                </p>
+              ) : (
+                <div className="flex overflow-x-auto scrollbar-hide gap-0 divide-x divide-slate-100">
+                  {leaderboard.map((entry, index) => {
+                    const topStat = entry.reviews > 0
+                      ? `${entry.reviews} review${entry.reviews !== 1 ? 's' : ''}`
+                      : entry.visits > 0
+                      ? `${entry.visits} visit${entry.visits !== 1 ? 's' : ''}`
+                      : entry.saves > 0
+                      ? `${entry.saves} saved`
+                      : 'New member'
+                    return (
+                      <Link
+                        key={entry.userId}
+                        to={`/users/${entry.userId}`}
+                        className="flex flex-col items-center gap-2 px-6 py-5 hover:bg-slate-50 transition-colors shrink-0 min-w-[130px]"
+                      >
+                        <span className="text-lg">{index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${index + 1}`}</span>
+                        <UserAvatar
+                          name={entry.displayName}
+                          avatarUrl={entry.avatarUrl}
+                          className="w-11 h-11"
+                          textClassName="text-sm"
+                        />
+                        <div className="text-center">
+                          <p className="text-xs font-semibold text-slate-900 truncate max-w-[100px]">{entry.displayName}</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">{topStat}</p>
+                        </div>
+                        <span className="text-xs font-bold text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">
+                          {entry.score} pts
+                        </span>
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          {!debouncedSearch && (
+            <section>
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-orange-500" />
+                  <h2 className="text-xl font-bold text-slate-900">Near You</h2>
+                </div>
+                <span className="text-sm text-slate-400">
+                  {refreshing ? 'Refreshing...' : `${places.length} places`}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                {nearYouPlaces.map((place) => (
+                  <PlaceCard key={place.id} place={place} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {!debouncedSearch && friendsLovedPlaces.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-xl font-bold text-slate-900">From People You Follow</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                 {friendsLovedPlaces.map((place) => (
                   <PlaceCard key={`follow-${place.id}`} place={place} recommendationReason={recommendationReasonFor(place)} />
                 ))}
@@ -431,45 +637,43 @@ export default function HomePage() {
             </section>
           )}
 
-          {/* Follow suggestions */}
-          {(suggestionsLoading || suggestions.length > 0) && (
-            <section>
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-slate-900">People You May Know</h2>
-              </div>
-              {suggestionsLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {suggestions.map((suggestedUser) => (
-                    <div key={suggestedUser.id} className="bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3">
-                      <Link to={`/users/${suggestedUser.id}`} className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 truncate">{suggestedUser.displayName}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {suggestedUser.reviewCount} reviews • {suggestedUser.followerCount} followers
-                        </p>
-                      </Link>
-                      <button
-                        onClick={() => handleFollowSuggestion(suggestedUser.id)}
-                        disabled={followPendingId === suggestedUser.id}
-                        className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-60 px-3 py-1.5 rounded-lg"
-                      >
-                        {followPendingId === suggestedUser.id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <UserPlus className="w-3 h-3" />
-                        )}
-                        Follow
-                      </button>
+          {/* People You May Know — horizontal row */}
+          {!debouncedSearch && suggestions.length > 0 && (
+            <section className="bg-white rounded-2xl border border-slate-200 p-5">
+              <h2 className="text-sm font-bold text-slate-900 mb-4">People You May Know</h2>
+              <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-1">
+                {suggestions.map((suggestedUser) => (
+                  <div key={suggestedUser.id} className="flex flex-col items-center gap-2 shrink-0 w-28">
+                    <Link to={`/users/${suggestedUser.id}`}>
+                      <UserAvatar
+                        name={suggestedUser.displayName}
+                        avatarUrl={suggestedUser.avatarUrl}
+                        className="w-14 h-14"
+                        textClassName="text-base"
+                      />
+                    </Link>
+                    <div className="text-center">
+                      <p className="text-xs font-semibold text-slate-900 truncate w-full">{suggestedUser.displayName}</p>
+                      <p className="text-[11px] text-slate-400">{suggestedUser.followerCount} followers</p>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <button
+                      onClick={() => handleFollowSuggestion(suggestedUser.id)}
+                      disabled={followPendingId === suggestedUser.id}
+                      className="w-full inline-flex items-center justify-center gap-1 text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-60 px-2 py-1.5 rounded-lg transition-colors"
+                    >
+                      {followPendingId === suggestedUser.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <UserPlus className="w-3 h-3" />
+                      )}
+                      Follow
+                    </button>
+                  </div>
+                ))}
+              </div>
             </section>
           )}
-        </>
+        </div>
       )}
     </div>
   )

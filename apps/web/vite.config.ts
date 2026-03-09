@@ -10,4 +10,8 @@ export default defineConfig({
       '/api': 'http://localhost:4000',
     },
   },
+  build: {
+    // Ensure public assets are copied correctly
+    assetsDir: 'assets',
+  },
 })

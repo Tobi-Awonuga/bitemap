@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
-import { Loader2, Shield, User, Trash2, UserX, UserCheck } from 'lucide-react'
+import { Loader2, Search, Shield, User, Trash2, UserX, UserCheck } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
+import UserAvatar from '../../components/ui/UserAvatar'
 
 type AdminUser = {
   id: string
   email: string
   displayName: string
+  avatarUrl?: string | null
   role: 'user' | 'admin'
   isActive: boolean
   deactivatedAt?: string | null
@@ -14,10 +16,6 @@ type AdminUser = {
   saveCount: number
   visitCount: number
   reviewCount: number
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
 }
 
 export default function AdminUsersPage() {
@@ -28,6 +26,8 @@ export default function AdminUsersPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<'all' | 'user' | 'admin'>('all')
 
   useEffect(() => {
     api
@@ -84,6 +84,16 @@ export default function AdminUsersPage() {
     }
   }
 
+  const filteredUsers = users.filter((u) => {
+    const q = search.toLowerCase()
+    const matchesSearch =
+      !search ||
+      u.displayName.toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q)
+    const matchesRole = roleFilter === 'all' || u.role === roleFilter
+    return matchesSearch && matchesRole
+  })
+
   return (
     <div className="space-y-6">
       <div>
@@ -92,19 +102,48 @@ export default function AdminUsersPage() {
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
 
+      {/* Search + role filter */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 flex-1">
+          <Search className="w-4 h-4 text-slate-400 shrink-0" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or email..."
+            className="flex-1 bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          {(['all', 'user', 'admin'] as const).map((role) => (
+            <button
+              key={role}
+              onClick={() => setRoleFilter(role)}
+              className={`px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
+                roleFilter === role
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-slate-800 border border-slate-700 text-slate-400 hover:text-white'
+              }`}
+            >
+              {role === 'all' ? 'All' : role === 'admin' ? 'Admins' : 'Users'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 text-orange-500 animate-spin" />
         </div>
       ) : (
         <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
-          {users.length === 0 ? (
+          {filteredUsers.length === 0 ? (
             <div className="text-center py-16">
-              <p className="text-slate-400 text-sm">No users found.</p>
+              <p className="text-slate-400 text-sm">{search || roleFilter !== 'all' ? 'No users match your filter.' : 'No users found.'}</p>
             </div>
           ) : (
             <div className="divide-y divide-slate-700">
-              {users.map((user) => {
+              {filteredUsers.map((user) => {
                 const isCurrentUser = user.id === currentUser?.id
                 return (
                   <div
@@ -113,9 +152,12 @@ export default function AdminUsersPage() {
                   >
                     {/* Avatar + info */}
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center shrink-0">
-                        <span className="text-white text-xs font-semibold">{getInitials(user.displayName)}</span>
-                      </div>
+                      <UserAvatar
+                        name={user.displayName}
+                        avatarUrl={user.avatarUrl}
+                        className="w-9 h-9 shrink-0"
+                        textClassName="text-xs"
+                      />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-semibold text-white truncate">{user.displayName}</p>

@@ -11,6 +11,7 @@ type ListQuery = {
   q?: string
   lat?: number
   lng?: number
+  priceLevel?: number
   radiusKm: number
   limit: number
   offset: number
@@ -51,6 +52,7 @@ type GooglePlace = {
   formattedAddress?: string
   location?: { latitude?: number; longitude?: number }
   rating?: number
+  priceLevel?: number
   types?: string[]
   photos?: Array<{ name?: string }>
 }
@@ -123,11 +125,16 @@ function parseListQuery(query: Record<string, string | undefined>): ListQuery {
   const parsedRadius = Number.parseFloat(query.radius ?? '10')
   const parsedLat = query.lat !== undefined ? Number.parseFloat(query.lat) : undefined
   const parsedLng = query.lng !== undefined ? Number.parseFloat(query.lng) : undefined
+  const parsedPriceLevel = query.priceLevel !== undefined ? Number.parseInt(query.priceLevel, 10) : undefined
 
   return {
     q: query.q?.trim() || undefined,
     lat: Number.isFinite(parsedLat) ? parsedLat : undefined,
     lng: Number.isFinite(parsedLng) ? parsedLng : undefined,
+    priceLevel:
+      Number.isFinite(parsedPriceLevel) && parsedPriceLevel! >= 1 && parsedPriceLevel! <= 4
+        ? parsedPriceLevel
+        : undefined,
     radiusKm: Number.isFinite(parsedRadius) ? Math.max(parsedRadius, 0.1) : 10,
     limit: Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 50,
     offset: Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0,
@@ -177,6 +184,13 @@ function buildTextQuery(rawQuery: string | undefined): string {
   // Preserve direct venue-name and cafe searches as typed.
   if (lower.includes('cafe') || lower.includes('coffee')) return query
   return `${query} restaurants`
+}
+
+function normalizePriceLevel(priceLevel: number | undefined): number | null {
+  if (!Number.isFinite(priceLevel)) return null
+  if (priceLevel! <= 0) return 1
+  if (priceLevel! > 4) return 4
+  return Math.round(priceLevel!)
 }
 
 function isFoodPlace(types: string[] | undefined): boolean {
@@ -237,6 +251,9 @@ async function getLocalPlaces(parsed: ListQuery): Promise<PlaceListRow[]> {
         (place.cuisine?.toLowerCase().includes(lower) ?? false) ||
         place.address.toLowerCase().includes(lower),
     )
+  }
+  if (parsed.priceLevel !== undefined) {
+    filtered = filtered.filter((place) => Number(place.priceLevel) === parsed.priceLevel)
   }
 
   if (parsed.lat !== undefined && parsed.lng !== undefined) {
@@ -302,7 +319,7 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
       'X-Goog-FieldMask':
-        'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.types,places.photos',
+        'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.photos',
     },
     body: JSON.stringify({
       textQuery: buildTextQuery(parsed.q),
@@ -336,6 +353,7 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
 
   const upsertedRows: PlaceListRow[] = []
   for (const providerPlace of providerPlaces) {
+    const normalizedPriceLevel = normalizePriceLevel(providerPlace.priceLevel)
     const primaryPhotoName = providerPlace.photos?.find((photo) => !!photo.name)?.name
     const providerImageUrl = primaryPhotoName ? `${GOOGLE_PHOTO_PREFIX}${primaryPhotoName}` : null
     const updateSet: Partial<typeof places.$inferInsert> = {
@@ -344,6 +362,7 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
       latitude: providerPlace.location!.latitude!,
       longitude: providerPlace.location!.longitude!,
       cuisine: inferCuisine(providerPlace.types),
+      ...(normalizedPriceLevel ? { priceLevel: normalizedPriceLevel } : {}),
     }
     if (providerImageUrl) {
       updateSet.imageUrl = providerImageUrl
@@ -358,6 +377,7 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
         longitude: providerPlace.location!.longitude!,
         googlePlaceId: providerPlace.id,
         cuisine: inferCuisine(providerPlace.types),
+        priceLevel: normalizedPriceLevel,
         imageUrl: providerImageUrl,
       })
       .onConflictDoUpdate({
@@ -387,7 +407,12 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
     )
   }
 
-  return decoratePlaceState(upsertedRows, userId)
+  const filteredRows =
+    parsed.priceLevel !== undefined
+      ? upsertedRows.filter((row) => Number(row.priceLevel) === parsed.priceLevel)
+      : upsertedRows
+
+  return decoratePlaceState(filteredRows, userId)
 }
 
 // GET /api/places â€” list with optional search + geo filter

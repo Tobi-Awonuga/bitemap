@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Loader2, MapPin, Shield, Star, UserPlus, UserMinus } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import UserAvatar from '../components/ui/UserAvatar'
 
 type UserProfileData = {
   user: {
@@ -34,10 +35,6 @@ type UserProfileData = {
   }>
 }
 
-function getInitials(name: string): string {
-  return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
-}
-
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
 }
@@ -45,6 +42,7 @@ function formatDate(dateStr: string): string {
 export default function UserProfilePage() {
   const { id } = useParams<{ id: string }>()
   const { user: me } = useAuth()
+  const navigate = useNavigate()
   const [profile, setProfile] = useState<UserProfileData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -121,17 +119,20 @@ export default function UserProfilePage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      <Link to="/discover" className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-orange-600">
+      <button onClick={() => navigate(-1)} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-orange-600">
         <ArrowLeft className="w-4 h-4" />
         Back
-      </Link>
+      </button>
 
       <div className="bg-white rounded-2xl shadow-sm p-6">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
-              <span className="text-white font-bold text-xl">{getInitials(profile.user.displayName)}</span>
-            </div>
+            <UserAvatar
+              name={profile.user.displayName}
+              avatarUrl={profile.user.avatarUrl}
+              className="w-16 h-16 rounded-2xl"
+              textClassName="text-xl"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-bold text-slate-900">{profile.user.displayName}</h1>
@@ -220,6 +221,7 @@ export default function UserProfilePage() {
           </div>
         )}
       </div>
+
     </div>
   )
 }

@@ -9,6 +9,8 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [resetUrl, setResetUrl] = useState<string | null>(null)
+  const [hint, setHint] = useState<string | null>(null)
+  const [delivery, setDelivery] = useState<'email' | 'dev-link' | 'unavailable' | null>(null)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -16,9 +18,18 @@ export default function ForgotPasswordPage() {
     setError(null)
     setMessage(null)
     setResetUrl(null)
+    setHint(null)
+    setDelivery(null)
     try {
-      const res = await api.post<{ message: string; resetUrl?: string }>('/api/auth/forgot-password', { email })
+      const res = await api.post<{
+        message: string
+        resetUrl?: string
+        hint?: string
+        delivery?: 'email' | 'dev-link' | 'unavailable'
+      }>('/api/auth/forgot-password', { email })
       setMessage(res.message)
+      if (res.hint) setHint(res.hint)
+      if (res.delivery) setDelivery(res.delivery)
       if (res.resetUrl) setResetUrl(res.resetUrl)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Request failed')
@@ -58,10 +69,17 @@ export default function ForgotPasswordPage() {
 
           {error && <p className="text-sm text-red-500">{error}</p>}
           {message && <p className="text-sm text-emerald-600">{message}</p>}
+          {hint && <p className="text-xs text-slate-500">{hint}</p>}
+          {delivery === 'email' && (
+            <p className="text-xs text-slate-500">Check your inbox and spam folder for the reset message.</p>
+          )}
           {resetUrl && (
-            <p className="text-xs text-slate-500 break-all">
-              Dev reset link: <a href={resetUrl} className="text-orange-600 hover:text-orange-700">{resetUrl}</a>
-            </p>
+            <div className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2">
+              <p className="text-xs font-medium text-orange-700 mb-1">Development reset link</p>
+              <p className="text-xs text-orange-700 break-all">
+                <a href={resetUrl} className="underline hover:no-underline">{resetUrl}</a>
+              </p>
+            </div>
           )}
 
           <button

@@ -27,6 +27,26 @@ export const resetPasswordSchema = z.object({
   password: passwordSchema,
 })
 
+const dataImageSchema = z
+  .string()
+  .regex(
+    /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$/,
+    'Avatar data URL must be a base64 image',
+  )
+
+export const profileUpdateSchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(80).optional(),
+    avatarUrl: z
+      .union([z.string().trim().url(), dataImageSchema])
+      .nullable()
+      .optional(),
+  })
+  .refine((payload) => payload.displayName !== undefined || payload.avatarUrl !== undefined, {
+    message: 'At least one field is required',
+    path: ['displayName'],
+  })
+
 export const placeSchema = z.object({
   name: z.string().min(1),
   cuisine: z.string().optional(),
@@ -63,6 +83,7 @@ export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>
+export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>
 export type PlaceInput = z.infer<typeof placeSchema>
 export type ReviewInput = z.infer<typeof reviewSchema>
 export type ReviewUpdateInput = z.infer<typeof reviewUpdateSchema>

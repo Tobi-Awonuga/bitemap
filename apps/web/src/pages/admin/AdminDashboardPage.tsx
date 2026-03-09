@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Users, UtensilsCrossed, MessageSquare, Bookmark, CheckCircle, Star, Loader2 } from 'lucide-react'
+import { Users, UtensilsCrossed, MessageSquare, Bookmark, CheckCircle, Star, Loader2, AlertTriangle, UserX } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
-import type { AdminInsights, AdminStats } from '@bitemap/shared'
+import type { AdminInsights, AdminStats, UserLeaderboardEntry } from '@bitemap/shared'
+import UserAvatar from '../../components/ui/UserAvatar'
 
 function StatCard({ label, value, icon: Icon, color }: { label: string; value: number; icon: React.ElementType; color: string }) {
   return (
@@ -19,6 +20,7 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [insights, setInsights] = useState<AdminInsights | null>(null)
+  const [leaderboard, setLeaderboard] = useState<UserLeaderboardEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -26,15 +28,18 @@ export default function AdminDashboardPage() {
     Promise.all([
       api.get<AdminStats>('/api/admin/stats'),
       api.get<AdminInsights>('/api/admin/insights'),
+      api.get<UserLeaderboardEntry[]>('/api/admin/leaderboard?limit=6'),
     ])
-      .then(([statsData, insightsData]) => {
+      .then(([statsData, insightsData, leaderboardData]) => {
         setStats(statsData)
         setInsights(insightsData)
+        setLeaderboard(leaderboardData)
         setError(null)
       })
       .catch((err) => {
         setStats(null)
         setInsights(null)
+        setLeaderboard([])
         setError(err instanceof Error ? err.message : 'Failed to load dashboard data')
       })
       .finally(() => setLoading(false))
@@ -56,21 +61,36 @@ export default function AdminDashboardPage() {
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
 
+      {/* Open reports alert */}
+      {(stats?.openReviewReports ?? 0) > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between">
+          <span className="text-amber-300 text-sm font-medium">
+            ⚠ {stats!.openReviewReports} review report{stats!.openReviewReports !== 1 ? 's' : ''} need attention
+          </span>
+          <Link to="/admin/reviews" className="text-amber-400 hover:text-amber-300 text-sm font-semibold transition-colors">
+            Review Now →
+          </Link>
+        </div>
+      )}
+
       {/* Stats grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
         <StatCard label="Users" value={stats?.totalUsers ?? 0} icon={Users} color="bg-blue-500/20 text-blue-400" />
         <StatCard label="Places" value={stats?.totalPlaces ?? 0} icon={UtensilsCrossed} color="bg-orange-500/20 text-orange-400" />
         <StatCard label="Reviews" value={stats?.totalReviews ?? 0} icon={MessageSquare} color="bg-violet-500/20 text-violet-400" />
         <StatCard label="Saves" value={stats?.totalSaves ?? 0} icon={Bookmark} color="bg-pink-500/20 text-pink-400" />
         <StatCard label="Visits" value={stats?.totalVisits ?? 0} icon={CheckCircle} color="bg-emerald-500/20 text-emerald-400" />
+        <StatCard label="Open Reports" value={stats?.openReviewReports ?? 0} icon={AlertTriangle} color="bg-amber-500/20 text-amber-300" />
+        <StatCard label="Deactivated" value={stats?.deactivatedUsers ?? 0} icon={UserX} color="bg-rose-500/20 text-rose-300" />
       </div>
 
       {/* Quick links */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         {[
           { label: 'Add a Place', desc: 'Add a new restaurant or venue', to: '/admin/places', color: 'from-orange-500 to-orange-600' },
           { label: 'Manage Users', desc: 'View and update user roles', to: '/admin/users', color: 'from-blue-500 to-blue-600' },
           { label: 'Moderate Reviews', desc: 'Review and remove content', to: '/admin/reviews', color: 'from-violet-500 to-violet-600' },
+          { label: 'Open Reports', desc: `${stats?.openReviewReports ?? 0} report(s) waiting`, to: '/admin/reviews', color: 'from-amber-500 to-amber-600' },
         ].map(({ label, desc, to, color }) => (
           <Link
             key={to}
@@ -132,6 +152,37 @@ export default function AdminDashboardPage() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-700">
+          <h2 className="text-sm font-semibold text-white">Top Community Contributors</h2>
+        </div>
+        {(leaderboard ?? []).length === 0 ? (
+          <p className="px-6 py-6 text-sm text-slate-400">No ranking data yet.</p>
+        ) : (
+          <div className="divide-y divide-slate-700">
+            {leaderboard.map((entry, index) => (
+              <div key={entry.userId} className="px-6 py-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-xs text-orange-300 font-semibold w-6">#{index + 1}</span>
+                  <UserAvatar
+                    name={entry.displayName}
+                    avatarUrl={entry.avatarUrl}
+                    className="w-9 h-9"
+                    textClassName="text-xs"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{entry.displayName}</p>
+                    <p className="text-xs text-slate-400">
+                      {entry.reviews} reviews • {entry.saves} saves • {entry.followers} followers • {entry.visits} visits
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Recent reviews */}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2, ThumbsUp, Flag, ChevronLeft, ChevronRight,
+  ArrowLeft, Star, MapPin, Bookmark, CheckCircle, Navigation, Loader2, AlertCircle, Send, Pencil, Trash2, ThumbsUp, Flag, ChevronLeft, ChevronRight, Copy,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
@@ -76,6 +76,8 @@ export default function PlaceDetailPage() {
   const [reviewActionPendingId, setReviewActionPendingId] = useState<string | null>(null)
   const [photoUrls, setPhotoUrls] = useState<string[]>([])
   const [activePhotoIndex, setActivePhotoIndex] = useState(0)
+  const [reviewSort, setReviewSort] = useState<'newest' | 'helpful' | 'rating'>('newest')
+  const [addressCopied, setAddressCopied] = useState(false)
 
   const refreshPlace = async (placeId: string) => {
     const updated = await api.get<PlaceDetail>(`/api/places/${placeId}`)
@@ -252,6 +254,22 @@ export default function PlaceDetailPage() {
 
   const gradient = gradientFor(place.id)
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.latitude},${place.longitude}`
+
+  const copyAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(place.address)
+      setAddressCopied(true)
+      setTimeout(() => setAddressCopied(false), 2000)
+    } catch {
+      // clipboard not available
+    }
+  }
+
+  const sortedReviews = [...(place.reviews ?? [])].sort((a, b) => {
+    if (reviewSort === 'helpful') return b.helpfulCount - a.helpfulCount
+    if (reviewSort === 'rating') return b.rating - a.rating
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })
   const hasGallery = photoUrls.length > 0
   const fromPath = typeof location.state === 'object' && location.state !== null && 'from' in location.state
     ? String((location.state as { from?: string }).from ?? '')
@@ -416,9 +434,16 @@ export default function PlaceDetailPage() {
               <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
                 <MapPin className="w-4 h-4 text-slate-500" />
               </div>
-              <div>
+              <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-slate-500 mb-0.5">Address</p>
                 <p className="text-sm text-slate-900">{place.address}</p>
+                <button
+                  onClick={copyAddress}
+                  className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-orange-500 transition-colors"
+                >
+                  <Copy className="w-3 h-3" />
+                  {addressCopied ? 'Copied!' : 'Copy address'}
+                </button>
               </div>
             </div>
           </div>
@@ -545,6 +570,26 @@ export default function PlaceDetailPage() {
             </div>
           )}
 
+          {/* Review sort controls */}
+          {place.reviews.length > 1 && (
+            <div className="flex items-center gap-1 mb-4">
+              <span className="text-xs text-slate-400 mr-1">Sort:</span>
+              {(['newest', 'helpful', 'rating'] as const).map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => setReviewSort(opt)}
+                  className={`text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
+                    reviewSort === opt
+                      ? 'bg-orange-500 text-white'
+                      : 'text-slate-500 hover:text-orange-500'
+                  }`}
+                >
+                  {opt === 'newest' ? 'Newest' : opt === 'helpful' ? 'Most Helpful' : 'Highest Rated'}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* All reviews */}
           {place.reviews.length === 0 ? (
             <p className="text-sm text-slate-400 text-center py-6">
@@ -552,7 +597,7 @@ export default function PlaceDetailPage() {
             </p>
           ) : (
             <div className="space-y-5">
-              {place.reviews.map((review) => (
+              {sortedReviews.map((review) => (
                 <div key={review.id} className="border-b border-slate-100 last:border-0 pb-5 last:pb-0">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">

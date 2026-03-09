@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, NavLink, Link } from 'react-router-dom'
-import { Map, Bookmark, CheckCircle, User, MapPin, X, Bell, Loader2 } from 'lucide-react'
+import { Compass, Map, Bookmark, CheckCircle, User, MapPin, X, Bell, Loader2 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useGeolocation } from '../../hooks/useGeolocation'
 import { api } from '../../lib/api'
+import UserAvatar from '../ui/UserAvatar'
 
 const navLinks = [
   { to: '/discover', label: 'Discover', end: true },
@@ -11,15 +12,6 @@ const navLinks = [
   { to: '/saved', label: 'Saved' },
   { to: '/visited', label: 'Visited' },
 ]
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase()
-}
 
 export default function AppShell() {
   const { user } = useAuth()
@@ -146,7 +138,7 @@ export default function AppShell() {
             ))}
           </nav>
 
-          <div className="flex items-center gap-2 shrink-0" ref={notificationsRef}>
+          <div className="relative flex items-center gap-2 shrink-0" ref={notificationsRef}>
             <button
               onClick={() => setNotificationsOpen((v) => !v)}
               className="relative w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
@@ -161,7 +153,7 @@ export default function AppShell() {
             </button>
 
             {notificationsOpen && (
-              <div className="absolute top-14 right-14 md:right-20 w-80 max-h-96 overflow-y-auto bg-white border border-slate-200 rounded-2xl shadow-lg z-[60]">
+              <div className="absolute right-0 top-full mt-2 w-80 max-h-96 overflow-y-auto bg-white border border-slate-200 rounded-2xl shadow-lg z-[60]">
                 <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                   <p className="text-sm font-semibold text-slate-900">Notifications</p>
                   <button
@@ -223,7 +215,12 @@ export default function AppShell() {
               className="w-9 h-9 bg-slate-900 hover:bg-slate-700 rounded-full flex items-center justify-center transition-colors"
             >
               {user ? (
-                <span className="text-white text-xs font-bold">{getInitials(user.displayName)}</span>
+                <UserAvatar
+                  name={user.displayName}
+                  avatarUrl={user.avatarUrl}
+                  className="w-9 h-9"
+                  textClassName="text-xs"
+                />
               ) : (
                 <User className="w-4 h-4 text-white" />
               )}
@@ -257,7 +254,7 @@ export default function AppShell() {
         {/* Mobile bottom nav */}
         <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-100 flex items-center justify-around px-2 py-2">
           {[
-            { to: '/discover', icon: Map, label: 'Discover', end: true },
+            { to: '/discover', icon: Compass, label: 'Discover', end: true },
             { to: '/map', icon: Map, label: 'Map', end: false },
             { to: '/saved', icon: Bookmark, label: 'Saved', end: false },
             { to: '/visited', icon: CheckCircle, label: 'Visited', end: false },

@@ -64,6 +64,13 @@
       "when": 1772939000000,
       "tag": "0008_muddy_rocket",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1773016200000,
+      "tag": "0009_price_level_backfill",
+      "breakpoints": true
     }
   ]
 }

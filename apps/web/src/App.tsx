@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import { ToastProvider } from './context/ToastContext'
 import AppShell from './components/layout/AppShell'
 import AdminShell from './components/layout/AdminShell'
 import ProtectedRoute from './components/auth/ProtectedRoute'
@@ -16,6 +17,9 @@ import VisitedPlacesPage from './pages/VisitedPlacesPage'
 import ProfilePage from './pages/ProfilePage'
 import UserProfilePage from './pages/UserProfilePage'
 import SettingsPage from './pages/SettingsPage'
+import FollowersPage from './pages/FollowersPage'
+import FollowingPage from './pages/FollowingPage'
+import LeaderboardPage from './pages/LeaderboardPage'
 import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import AdminPlacesPage from './pages/admin/AdminPlacesPage'
 import AdminUsersPage from './pages/admin/AdminUsersPage'
@@ -24,6 +28,7 @@ import AdminReviewsPage from './pages/admin/AdminReviewsPage'
 export default function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <BrowserRouter>
         <Routes>
           {/* Public */}
@@ -42,8 +47,11 @@ export default function App() {
               <Route path="/saved" element={<SavedPlacesPage />} />
               <Route path="/visited" element={<VisitedPlacesPage />} />
               <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/profile/followers" element={<FollowersPage />} />
+              <Route path="/profile/following" element={<FollowingPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/users/:id" element={<UserProfilePage />} />
+              <Route path="/leaderboard" element={<LeaderboardPage />} />
             </Route>
           </Route>
 
@@ -60,6 +68,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/discover" replace />} />
         </Routes>
       </BrowserRouter>
+      </ToastProvider>
     </AuthProvider>
   )
 }

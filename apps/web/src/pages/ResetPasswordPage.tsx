@@ -48,8 +48,16 @@ export default function ResetPasswordPage() {
 
         <div>
           <h1 className="text-xl font-bold text-slate-900">Create new password</h1>
-          <p className="text-sm text-slate-500 mt-1">Use a strong password with uppercase, lowercase and number.</p>
+          <p className="text-sm text-slate-500 mt-1">
+            Use the reset link from your email (or dev reset link), then set a strong password.
+          </p>
         </div>
+
+        {!token && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+            Missing reset token. Go back to <Link to="/forgot-password" className="underline">forgot password</Link> to request a new link.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
