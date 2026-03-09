@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../../db'
 import { places, reviews, reviewHelpfulVotes, reviewReports, saves, visits } from '../../db/schema'
 import { requireAuth, requireAdmin, type AuthRequest } from '../../middleware/auth.middleware'
-import { placeSchema } from '@bitemap/shared'
+import { placeAdminUpdateSchema, placeSchema } from '@bitemap/shared'
 
 export const placesRouter = Router()
 
@@ -28,6 +28,8 @@ type PlaceListRow = {
   priceLevel: number | null
   imageUrl: string | null
   googlePlaceId: string | null
+  isActive?: boolean
+  status?: 'active' | 'closed' | 'superseded'
   createdAt: Date
   avgRating: number
   reviewCount: number
@@ -193,6 +195,10 @@ function normalizePriceLevel(priceLevel: number | undefined): number | null {
   return Math.round(priceLevel!)
 }
 
+function activePlaceFilter() {
+  return and(eq(places.isActive, true), eq(places.status, 'active'))
+}
+
 function isFoodPlace(types: string[] | undefined): boolean {
   if (!types || types.length === 0) return false
   const includesFoodType = types.some((type) => FOOD_PLACE_TYPES.has(type))
@@ -304,11 +310,14 @@ async function getLocalPlaces(parsed: ListQuery): Promise<PlaceListRow[]> {
       priceLevel: places.priceLevel,
       imageUrl: places.imageUrl,
       googlePlaceId: places.googlePlaceId,
+      isActive: places.isActive,
+      status: places.status,
       createdAt: places.createdAt,
       avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`.as('avg_rating'),
       reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
     })
     .from(places)
+    .where(activePlaceFilter())
     .leftJoin(reviews, eq(reviews.placeId, places.id))
     .groupBy(places.id)
     .limit(parsed.limit)
@@ -434,6 +443,8 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
       latitude: providerPlace.location!.latitude!,
       longitude: providerPlace.location!.longitude!,
       cuisine: inferCuisine(providerPlace.types),
+      source: 'google',
+      providerLastSeenAt: new Date(),
       ...(normalizedPriceLevel ? { priceLevel: normalizedPriceLevel } : {}),
     }
     if (providerImageUrl) {
@@ -451,6 +462,8 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
         cuisine: inferCuisine(providerPlace.types),
         priceLevel: normalizedPriceLevel,
         imageUrl: providerImageUrl,
+        source: 'google',
+        providerLastSeenAt: new Date(),
       })
       .onConflictDoUpdate({
         target: places.googlePlaceId,
@@ -467,6 +480,8 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
         priceLevel: places.priceLevel,
         imageUrl: places.imageUrl,
         googlePlaceId: places.googlePlaceId,
+        isActive: places.isActive,
+        status: places.status,
         createdAt: places.createdAt,
       })
 
@@ -484,7 +499,10 @@ async function fetchGoogleNearby(parsed: ListQuery, userId: string): Promise<Pla
       ? upsertedRows.filter((row) => Number(row.priceLevel) === parsed.priceLevel)
       : upsertedRows
 
-  return decoratePlaceState(filteredRows, userId)
+  return decoratePlaceState(
+    filteredRows.filter((row) => row.isActive !== false && row.status !== 'closed' && row.status !== 'superseded'),
+    userId,
+  )
 }
 
 // GET /api/places â€” list with optional search + geo filter
@@ -517,6 +535,7 @@ placesRouter.get('/nearby', requireAuth, async (req: AuthRequest, res) => {
   const cacheKey = JSON.stringify({
     userId: req.user!.id,
     q: parsed.q ?? '',
+    priceLevel: parsed.priceLevel ?? null,
     lat: parsed.lat,
     lng: parsed.lng,
     radiusKm: parsed.radiusKm,
@@ -758,16 +777,70 @@ placesRouter.post('/', requireAuth, requireAdmin, async (req: AuthRequest, res) 
     return
   }
 
-  const [place] = await db.insert(places).values(parsed.data).returning()
+  const [place] = await db.insert(places).values({ ...parsed.data, source: 'manual' }).returning()
   res.status(201).json(place)
 })
 
 // PATCH /api/places/:id — admin only
 placesRouter.patch('/:id', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const placeId = String(req.params.id)
+  const parsed = placeAdminUpdateSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten().fieldErrors })
+    return
+  }
+
+  const nextValues = parsed.data
+  const updatePayload: Partial<typeof places.$inferInsert> = {
+    ...(nextValues.name !== undefined ? { name: nextValues.name } : {}),
+    ...(nextValues.cuisine !== undefined ? { cuisine: nextValues.cuisine } : {}),
+    ...(nextValues.description !== undefined ? { description: nextValues.description } : {}),
+    ...(nextValues.address !== undefined ? { address: nextValues.address } : {}),
+    ...(nextValues.latitude !== undefined ? { latitude: nextValues.latitude } : {}),
+    ...(nextValues.longitude !== undefined ? { longitude: nextValues.longitude } : {}),
+    ...(nextValues.priceLevel !== undefined ? { priceLevel: nextValues.priceLevel } : {}),
+    ...(nextValues.imageUrl !== undefined ? { imageUrl: nextValues.imageUrl } : {}),
+    ...(nextValues.googlePlaceId !== undefined ? { googlePlaceId: nextValues.googlePlaceId } : {}),
+    ...(nextValues.isActive !== undefined ? { isActive: nextValues.isActive } : {}),
+    ...(nextValues.status !== undefined ? { status: nextValues.status } : {}),
+    ...(nextValues.source !== undefined ? { source: nextValues.source } : {}),
+    ...(nextValues.supersededByPlaceId !== undefined ? { supersededByPlaceId: nextValues.supersededByPlaceId } : {}),
+    ...(nextValues.providerLastSeenAt !== undefined
+      ? { providerLastSeenAt: nextValues.providerLastSeenAt ? new Date(nextValues.providerLastSeenAt) : null }
+      : {}),
+  }
+
+  if (nextValues.status !== undefined || nextValues.isActive !== undefined) {
+    const nextStatus = nextValues.status
+    const nextIsActive = nextValues.isActive
+
+    if (nextStatus === 'active') {
+      updatePayload.closedAt = null
+      if (nextIsActive === undefined) updatePayload.isActive = true
+    } else if (nextStatus === 'closed' || nextStatus === 'superseded') {
+      updatePayload.closedAt = new Date()
+      if (nextIsActive === undefined) updatePayload.isActive = false
+    }
+
+    if (nextIsActive === false && nextValues.status === undefined) {
+      updatePayload.closedAt = new Date()
+      if (updatePayload.status === undefined) updatePayload.status = 'closed'
+    }
+
+    if (nextIsActive === true && nextValues.status === undefined) {
+      updatePayload.closedAt = null
+      if (updatePayload.status === undefined) updatePayload.status = 'active'
+    }
+  }
+
+  if (updatePayload.status === 'superseded' && !updatePayload.supersededByPlaceId) {
+    res.status(400).json({ error: 'supersededByPlaceId is required when status is superseded' })
+    return
+  }
+
   const [updated] = await db
     .update(places)
-    .set(req.body)
+    .set(updatePayload)
     .where(eq(places.id, placeId))
     .returning()
 

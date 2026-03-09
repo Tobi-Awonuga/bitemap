@@ -71,6 +71,13 @@
       "when": 1773016200000,
       "tag": "0009_price_level_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1773078857110,
+      "tag": "0010_cute_liz_osborn",
+      "breakpoints": true
     }
   ]
 }

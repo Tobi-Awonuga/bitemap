@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Loader2, Trophy } from 'lucide-react'
 import { api } from '../lib/api'
 import UserAvatar from '../components/ui/UserAvatar'
+import { useAuth } from '../context/AuthContext'
 
 type LeaderboardUser = {
   userId: string
@@ -27,6 +28,7 @@ const PODIUM_AVATARS = ['w-11 h-11', 'w-14 h-14', 'w-10 h-10']
 export default function LeaderboardPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
   const [leaderboard, setLeaderboard] = useState<LeaderboardUser[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -82,10 +84,11 @@ export default function LeaderboardPage() {
               {PODIUM_ORDER.map((idx, displayIndex) => {
                 const entry = leaderboard[idx]
                 const rank = idx + 1
+                const profilePath = entry.userId === user?.id ? '/profile' : `/users/${entry.userId}`
                 return (
                   <Link
                     key={entry.userId}
-                    to={`/users/${entry.userId}`}
+                    to={profilePath}
                     className={`flex flex-1 max-w-[150px] flex-col items-center justify-end rounded-[28px] border px-4 pb-4 pt-3 text-center transition-all duration-200 hover:-translate-y-1 hover:border-amber-300 hover:shadow-[0_24px_60px_-30px_rgba(249,115,22,0.42)] ${PODIUM_STYLES[displayIndex]}`}
                   >
                     <span className="mb-2 text-xl">{MEDALS[rank - 1]}</span>
@@ -105,32 +108,35 @@ export default function LeaderboardPage() {
           )}
 
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-            {leaderboard.map((entry, index) => (
-              <Link
-                key={entry.userId}
-                to={`/users/${entry.userId}`}
-                className="flex items-center gap-4 px-5 py-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
-              >
-                <span className={`w-7 text-sm font-bold shrink-0 ${index < 3 ? 'text-lg' : 'text-slate-400'}`}>
-                  {index < 3 ? MEDALS[index] : `#${index + 1}`}
-                </span>
-                <UserAvatar
-                  name={entry.displayName}
-                  avatarUrl={entry.avatarUrl}
-                  className="w-10 h-10 shrink-0"
-                  textClassName="text-xs"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900 truncate">{entry.displayName}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {entry.reviews} reviews - {entry.saves} saves - {entry.followers} followers - {entry.visits} visits
-                  </p>
-                </div>
-                <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-full shrink-0">
-                  {entry.points} pts
-                </span>
-              </Link>
-            ))}
+            {leaderboard.map((entry, index) => {
+              const profilePath = entry.userId === user?.id ? '/profile' : `/users/${entry.userId}`
+              return (
+                <Link
+                  key={entry.userId}
+                  to={profilePath}
+                  className="flex items-center gap-4 px-5 py-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
+                >
+                  <span className={`w-7 text-sm font-bold shrink-0 ${index < 3 ? 'text-lg' : 'text-slate-400'}`}>
+                    {index < 3 ? MEDALS[index] : `#${index + 1}`}
+                  </span>
+                  <UserAvatar
+                    name={entry.displayName}
+                    avatarUrl={entry.avatarUrl}
+                    className="w-10 h-10 shrink-0"
+                    textClassName="text-xs"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{entry.displayName}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {entry.reviews} reviews - {entry.saves} saves - {entry.followers} followers - {entry.visits} visits
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-full shrink-0">
+                    {entry.points} pts
+                  </span>
+                </Link>
+              )
+            })}
           </div>
         </>
       )}

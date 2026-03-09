@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { eq, count, sql, desc } from 'drizzle-orm'
+import { eq, count, sql, desc, ilike, or } from 'drizzle-orm'
 import { db } from '../../db'
 import { users, places, reviewReports, reviews, saves, visits } from '../../db/schema'
 import { requireAuth, requireAdmin, AuthRequest } from '../../middleware/auth.middleware'
@@ -216,8 +216,16 @@ adminRouter.delete('/users/:id', async (req: AuthRequest, res) => {
 adminRouter.get('/places', async (req, res) => {
   const limitRaw = Number.parseInt(String(req.query.limit ?? '25'), 10)
   const offsetRaw = Number.parseInt(String(req.query.offset ?? '0'), 10)
+  const query = String(req.query.q ?? '').trim()
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 25
   const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0
+  const whereClause = query
+    ? or(
+        ilike(places.name, `%${query}%`),
+        ilike(places.address, `%${query}%`),
+        sql`coalesce(${places.cuisine}, '') ilike ${`%${query}%`}`,
+      )
+    : undefined
 
   const [allPlaces, [{ total }]] = await Promise.all([
     db
@@ -230,19 +238,26 @@ adminRouter.get('/places', async (req, res) => {
         longitude: places.longitude,
         priceLevel: places.priceLevel,
         imageUrl: places.imageUrl,
+        isActive: places.isActive,
+        status: places.status,
+        closedAt: places.closedAt,
+        supersededByPlaceId: places.supersededByPlaceId,
+        source: places.source,
+        providerLastSeenAt: places.providerLastSeenAt,
         createdAt: places.createdAt,
         avgRating: sql<number>`COALESCE(AVG(${reviews.rating}), 0)`.as('avg_rating'),
         reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
         saveCount: sql<number>`COUNT(DISTINCT ${saves.id})`.as('save_count'),
       })
       .from(places)
+      .where(whereClause)
       .leftJoin(reviews, eq(reviews.placeId, places.id))
       .leftJoin(saves, eq(saves.placeId, places.id))
       .groupBy(places.id)
       .orderBy(desc(places.createdAt))
       .limit(limit)
       .offset(offset),
-    db.select({ total: count() }).from(places),
+    db.select({ total: count() }).from(places).where(whereClause),
   ])
 
   res.json({

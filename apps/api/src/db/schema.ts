@@ -37,10 +37,19 @@ export const places = pgTable('places', {
   googlePlaceId: text('google_place_id').unique(),
   priceLevel: integer('price_level'),
   imageUrl: text('image_url'),
+  isActive: boolean('is_active').notNull().default(true),
+  status: text('status', { enum: ['active', 'closed', 'superseded'] }).notNull().default('active'),
+  closedAt: timestamp('closed_at'),
+  supersededByPlaceId: uuid('superseded_by_place_id'),
+  source: text('source', { enum: ['manual', 'google'] }).notNull().default('manual'),
+  providerLastSeenAt: timestamp('provider_last_seen_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
   latIdx: index('places_latitude_idx').on(table.latitude),
   lngIdx: index('places_longitude_idx').on(table.longitude),
+  statusIdx: index('places_status_idx').on(table.status),
+  activeIdx: index('places_is_active_idx').on(table.isActive),
+  supersededByIdx: index('places_superseded_by_place_id_idx').on(table.supersededByPlaceId),
 }))
 
 export const reviews = pgTable('reviews', {

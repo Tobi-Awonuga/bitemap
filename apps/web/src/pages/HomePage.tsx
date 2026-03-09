@@ -648,12 +648,13 @@ export default function HomePage() {
                       : entry.visits > 0
                       ? `${entry.visits} visit${entry.visits !== 1 ? 's' : ''}`
                       : entry.saves > 0
-                      ? `${entry.saves} saved`
+                  ? `${entry.saves} saved`
                       : 'New member'
+                    const profilePath = entry.userId === user?.id ? '/profile' : `/users/${entry.userId}`
                     return (
                       <Link
                         key={entry.userId}
-                        to={`/users/${entry.userId}`}
+                        to={profilePath}
                         className="flex flex-col items-center gap-2 px-6 py-5 hover:bg-slate-50 transition-colors shrink-0 min-w-[130px]"
                       >
                         <span className="text-lg">{index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${index + 1}`}</span>

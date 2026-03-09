@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Star, Loader2, AlertCircle, X, Pencil } from 'lucide-react'
+import { Plus, Trash2, Star, Loader2, AlertCircle, X, Pencil, Search } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 
@@ -7,7 +7,18 @@ type AdminPlace = {
   id: string
   name: string
   cuisine?: string | null
+  description?: string | null
   address: string
+  latitude: number
+  longitude: number
+  priceLevel?: number | null
+  imageUrl?: string | null
+  isActive: boolean
+  status: 'active' | 'closed' | 'superseded'
+  closedAt?: string | null
+  supersededByPlaceId?: string | null
+  source: 'manual' | 'google'
+  providerLastSeenAt?: string | null
   avgRating: number
   reviewCount: number
   saveCount: number
@@ -37,6 +48,7 @@ export default function AdminPlacesPage() {
   const [limit] = useState(20)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<NewPlace>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
@@ -46,17 +58,27 @@ export default function AdminPlacesPage() {
   const [editForm, setEditForm] = useState<NewPlace>(emptyForm)
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  const [statusValue, setStatusValue] = useState<'active' | 'closed' | 'superseded'>('active')
+  const [supersededByPlaceId, setSupersededByPlaceId] = useState('')
 
-  const loadPlaces = (nextOffset = 0) => {
+  const loadPlaces = (nextOffset = 0, nextSearch = search) => {
     setLoading(true)
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(nextOffset),
+    })
+    const query = nextSearch.trim()
+    if (query) params.set('q', query)
+
     api
       .get<{ data: AdminPlace[]; pagination: { total: number; limit: number; offset: number; hasMore: boolean } }>(
-        `/api/admin/places?limit=${limit}&offset=${nextOffset}`,
+        `/api/admin/places?${params.toString()}`,
       )
       .then((res) => {
         setPlaces(res.data)
         setTotal(res.pagination.total)
         setOffset(res.pagination.offset)
+        setError(null)
       })
       .catch((err) => {
         setPlaces([])
@@ -67,9 +89,17 @@ export default function AdminPlacesPage() {
   }
 
   useEffect(() => {
-    loadPlaces(0)
+    loadPlaces(0, '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadPlaces(0, search)
+    }, 250)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -86,11 +116,11 @@ export default function AdminPlacesPage() {
         priceLevel: form.priceLevel ? parseInt(form.priceLevel) : undefined,
         imageUrl: form.imageUrl || undefined,
       }
-      const place = await api.post<AdminPlace>('/api/places', payload)
+      await api.post<AdminPlace>('/api/places', payload)
       setError(null)
       setForm(emptyForm)
       setShowForm(false)
-      loadPlaces(0)
+      loadPlaces(0, search)
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to add place')
     } finally {
@@ -104,7 +134,7 @@ export default function AdminPlacesPage() {
     try {
       await api.del(`/api/admin/places/${id}`)
       setError(null)
-      loadPlaces(Math.max(0, Math.min(offset, Math.max(total - 1, 0))))
+      loadPlaces(Math.max(0, Math.min(offset, Math.max(total - 1, 0))), search)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete place')
     } finally {
@@ -117,19 +147,22 @@ export default function AdminPlacesPage() {
     setEditForm({
       name: place.name,
       cuisine: place.cuisine ?? '',
-      description: '',
+      description: place.description ?? '',
       address: place.address,
-      latitude: '',
-      longitude: '',
-      priceLevel: '',
-      imageUrl: '',
+      latitude: String(place.latitude),
+      longitude: String(place.longitude),
+      priceLevel: place.priceLevel ? String(place.priceLevel) : '',
+      imageUrl: place.imageUrl ?? '',
     })
+    setStatusValue(place.status)
+    setSupersededByPlaceId(place.supersededByPlaceId ?? '')
     setEditError(null)
   }
 
   const closeEdit = () => {
     setEditingPlace(null)
     setEditError(null)
+    setSupersededByPlaceId('')
   }
 
   const handleEdit = async (e: React.FormEvent) => {
@@ -142,15 +175,18 @@ export default function AdminPlacesPage() {
         name: editForm.name,
         cuisine: editForm.cuisine || undefined,
         description: editForm.description || undefined,
-        address: editForm.address || undefined,
-        imageUrl: editForm.imageUrl || undefined,
+        address: editForm.address,
+        latitude: parseFloat(editForm.latitude),
+        longitude: parseFloat(editForm.longitude),
+        priceLevel: editForm.priceLevel ? parseInt(editForm.priceLevel) : null,
+        imageUrl: editForm.imageUrl || null,
+        status: statusValue,
+        isActive: statusValue === 'active',
+        supersededByPlaceId: statusValue === 'superseded' ? supersededByPlaceId || null : null,
       }
-      if (editForm.latitude) payload.latitude = parseFloat(editForm.latitude)
-      if (editForm.longitude) payload.longitude = parseFloat(editForm.longitude)
-      if (editForm.priceLevel) payload.priceLevel = parseInt(editForm.priceLevel)
 
       const updated = await api.patch<AdminPlace>(`/api/places/${editingPlace.id}`, payload)
-      setPlaces((prev) => prev.map((p) => (p.id === editingPlace.id ? { ...p, ...updated } : p)))
+      setPlaces((prev) => prev.map((place) => (place.id === editingPlace.id ? { ...place, ...updated } : place)))
       setError(null)
       closeEdit()
     } catch (err) {
@@ -163,13 +199,13 @@ export default function AdminPlacesPage() {
   const editField = (key: keyof NewPlace) => ({
     value: editForm[key],
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      setEditForm((f) => ({ ...f, [key]: e.target.value })),
+      setEditForm((current) => ({ ...current, [key]: e.target.value })),
   })
 
   const field = (key: keyof NewPlace) => ({
     value: form[key],
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      setForm((f) => ({ ...f, [key]: e.target.value })),
+      setForm((current) => ({ ...current, [key]: e.target.value })),
   })
 
   return (
@@ -187,9 +223,20 @@ export default function AdminPlacesPage() {
           Add Place
         </button>
       </div>
+
+      <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5">
+        <Search className="w-4 h-4 text-slate-400 shrink-0" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search places by name, cuisine, or address..."
+          className="flex-1 bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
+        />
+      </div>
+
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      {/* Add form */}
       {showForm && (
         <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6">
           <div className="flex items-center justify-between mb-5">
@@ -257,7 +304,7 @@ export default function AdminPlacesPage() {
         <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
           {places.length === 0 ? (
             <div className="text-center py-16">
-              <p className="text-slate-400 text-sm">No places yet. Add the first one!</p>
+              <p className="text-slate-400 text-sm">No places found.</p>
             </div>
           ) : (
             <div className="divide-y divide-slate-700">
@@ -270,10 +317,20 @@ export default function AdminPlacesPage() {
                     >
                       {place.name}
                     </Link>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      {place.cuisine && (
-                        <span className="text-xs text-orange-400">{place.cuisine}</span>
-                      )}
+                    <div className="mt-0.5 flex items-center gap-3 flex-wrap">
+                      {place.cuisine && <span className="text-xs text-orange-400">{place.cuisine}</span>}
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-full ${
+                          place.status === 'active'
+                            ? 'bg-emerald-500/10 text-emerald-300'
+                            : place.status === 'closed'
+                            ? 'bg-amber-500/10 text-amber-300'
+                            : 'bg-violet-500/10 text-violet-300'
+                        }`}
+                      >
+                        {place.status}
+                      </span>
+                      <span className="text-[11px] text-slate-500">{place.source}</span>
                       <span className="text-xs text-slate-500 truncate">{place.address}</span>
                     </div>
                   </div>
@@ -281,7 +338,7 @@ export default function AdminPlacesPage() {
                     <div className="flex items-center gap-1">
                       <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
                       <span className="text-xs font-medium text-white">
-                        {Number(place.avgRating) > 0 ? Number(place.avgRating).toFixed(1) : 'â€”'}
+                        {Number(place.avgRating) > 0 ? Number(place.avgRating).toFixed(1) : '—'}
                       </span>
                     </div>
                     <span className="text-xs text-slate-400">{place.reviewCount} reviews</span>
@@ -311,7 +368,6 @@ export default function AdminPlacesPage() {
         </div>
       )}
 
-      {/* Edit modal */}
       {editingPlace && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={closeEdit}>
           <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
@@ -325,9 +381,9 @@ export default function AdminPlacesPage() {
               {[
                 { label: 'Name *', key: 'name' as const, required: true },
                 { label: 'Cuisine', key: 'cuisine' as const },
-                { label: 'Address', key: 'address' as const },
-                { label: 'Latitude (leave blank to keep)', key: 'latitude' as const, type: 'number' },
-                { label: 'Longitude (leave blank to keep)', key: 'longitude' as const, type: 'number' },
+                { label: 'Address *', key: 'address' as const, required: true },
+                { label: 'Latitude *', key: 'latitude' as const, type: 'number', required: true },
+                { label: 'Longitude *', key: 'longitude' as const, type: 'number', required: true },
                 { label: 'Price Level (1-4)', key: 'priceLevel' as const, type: 'number' },
                 { label: 'Image URL', key: 'imageUrl' as const },
               ].map(({ label, key, required, type }) => (
@@ -347,6 +403,29 @@ export default function AdminPlacesPage() {
                   {...editField('description')}
                   rows={3}
                   className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 resize-none placeholder:text-slate-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">Status</label>
+                <select
+                  value={statusValue}
+                  onChange={(e) => setStatusValue(e.target.value as 'active' | 'closed' | 'superseded')}
+                  className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30"
+                >
+                  <option value="active">Active</option>
+                  <option value="closed">Closed</option>
+                  <option value="superseded">Superseded</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">Replacement Place ID</label>
+                <input
+                  type="text"
+                  value={supersededByPlaceId}
+                  onChange={(e) => setSupersededByPlaceId(e.target.value)}
+                  disabled={statusValue !== 'superseded'}
+                  placeholder={statusValue === 'superseded' ? 'UUID of replacement place' : 'Only for superseded places'}
+                  className="w-full bg-slate-900 border border-slate-600 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 placeholder:text-slate-600 disabled:opacity-50"
                 />
               </div>
               {editError && (
@@ -380,14 +459,14 @@ export default function AdminPlacesPage() {
           </p>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => loadPlaces(Math.max(0, offset - limit))}
+              onClick={() => loadPlaces(Math.max(0, offset - limit), search)}
               disabled={offset === 0}
               className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 text-xs disabled:opacity-40"
             >
               Previous
             </button>
             <button
-              onClick={() => loadPlaces(offset + limit)}
+              onClick={() => loadPlaces(offset + limit, search)}
               disabled={offset + limit >= total}
               className="px-3 py-1.5 rounded-lg border border-slate-600 text-slate-300 text-xs disabled:opacity-40"
             >

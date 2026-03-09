@@ -18,6 +18,12 @@ export interface Place {
   priceLevel?: number
   imageUrl?: string
   googlePlaceId?: string
+  isActive?: boolean
+  status?: 'active' | 'closed' | 'superseded'
+  closedAt?: string | null
+  supersededByPlaceId?: string | null
+  source?: 'manual' | 'google'
+  providerLastSeenAt?: string | null
   createdAt: string
 }
 

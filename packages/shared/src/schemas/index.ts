@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PLACE_SOURCES, PLACE_STATUSES } from '../constants'
 
 const passwordSchema = z
   .string()
@@ -59,6 +60,26 @@ export const placeSchema = z.object({
   googlePlaceId: z.string().optional(),
 })
 
+export const placeAdminUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  cuisine: z.string().optional(),
+  description: z.string().optional(),
+  address: z.string().min(1).optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  priceLevel: z.number().int().min(1).max(4).nullable().optional(),
+  imageUrl: z.string().url().nullable().optional(),
+  googlePlaceId: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+  status: z.enum(PLACE_STATUSES).optional(),
+  supersededByPlaceId: z.string().uuid().nullable().optional(),
+  source: z.enum(PLACE_SOURCES).optional(),
+  providerLastSeenAt: z.string().datetime().nullable().optional(),
+})
+  .refine((payload) => Object.keys(payload).length > 0, {
+    message: 'At least one field is required',
+  })
+
 export const reviewSchema = z.object({
   placeId: z.string().uuid(),
   rating: z.number().min(1).max(5),
@@ -85,6 +106,7 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>
 export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>
 export type PlaceInput = z.infer<typeof placeSchema>
+export type PlaceAdminUpdateInput = z.infer<typeof placeAdminUpdateSchema>
 export type ReviewInput = z.infer<typeof reviewSchema>
 export type ReviewUpdateInput = z.infer<typeof reviewUpdateSchema>
 export type SaveInput = z.infer<typeof saveSchema>

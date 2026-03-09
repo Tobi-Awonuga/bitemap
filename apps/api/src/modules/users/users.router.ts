@@ -398,16 +398,36 @@ usersRouter.get('/suggestions', requireAuth, async (req: AuthRequest, res) => {
   })
   const followingIds = new Set(followingRows.map((row) => row.followingId))
 
+  const reviewCounts = db
+    .select({
+      userId: reviews.userId,
+      reviewCount: sql<number>`count(*)::int`.as('review_count'),
+    })
+    .from(reviews)
+    .groupBy(reviews.userId)
+    .as('review_counts')
+
+  const followerCounts = db
+    .select({
+      userId: follows.followingId,
+      followerCount: sql<number>`count(*)::int`.as('follower_count'),
+    })
+    .from(follows)
+    .groupBy(follows.followingId)
+    .as('follower_counts')
+
   const candidates = await db
     .select({
       id: users.id,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       createdAt: users.createdAt,
-      reviewCount: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('review_count'),
-      followerCount: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('follower_count'),
+      reviewCount: sql<number>`coalesce(${reviewCounts.reviewCount}, 0)::int`.as('review_count'),
+      followerCount: sql<number>`coalesce(${followerCounts.followerCount}, 0)::int`.as('follower_count'),
     })
     .from(users)
+    .leftJoin(reviewCounts, eq(reviewCounts.userId, users.id))
+    .leftJoin(followerCounts, eq(followerCounts.userId, users.id))
     .where(and(eq(users.isActive, true)))
     .orderBy(desc(users.createdAt))
     .limit(50)
