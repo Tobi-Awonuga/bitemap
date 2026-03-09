@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Search, MapPin, TrendingUp, Sparkles, Loader2, UserPlus, Trophy } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import PlaceCard, { type Place } from '../components/ui/PlaceCard'
 import { api } from '../lib/api'
 import { useGeolocation } from '../hooks/useGeolocation'
@@ -13,6 +13,7 @@ const CUISINE_TAGS = [
 const DISCOVER_CACHE_KEY_PREFIX = 'bm_discover_cache'
 const FOLLOWING_PICKS_CACHE_KEY_PREFIX = 'bm_following_picks'
 const DISCOVER_STATE_KEY_PREFIX = 'bm_discover_state'
+const FEATURED_PLACE_LIMIT = 8
 
 type FeedItem = {
   type: 'review' | 'visit'
@@ -101,6 +102,7 @@ function extractCityFromAddress(address: string | undefined): string | null {
 
 export default function HomePage() {
   const { user } = useAuth()
+  const location = useLocation()
   const discoverCacheKey = `${DISCOVER_CACHE_KEY_PREFIX}:${user?.id ?? 'anon'}`
   const followingCacheKey = `${FOLLOWING_PICKS_CACHE_KEY_PREFIX}:${user?.id ?? 'anon'}`
   const discoverStateKey = `${DISCOVER_STATE_KEY_PREFIX}:${user?.id ?? 'anon'}`
@@ -278,7 +280,7 @@ export default function HomePage() {
 
   useEffect(() => {
     api
-      .get<{ data: Recommendations }>('/api/users/recommendations?limit=6')
+      .get<{ data: Recommendations }>(`/api/users/recommendations?limit=${FEATURED_PLACE_LIMIT}`)
       .then((res) => setRecommendations(res.data))
       .catch(() => setRecommendations({ forYou: [], friendsLoved: [], trendingNow: [] }))
   }, [user?.id])
@@ -339,20 +341,20 @@ export default function HomePage() {
 
   const curated = useMemo(() => {
     const excluded = new Set<string>()
-    const nearYou = pickUnique([...places], excluded, 6)
+    const nearYou = pickUnique([...places], excluded, FEATURED_PLACE_LIMIT)
     const trending = pickUnique(
       [...places]
         .filter((place) => place.reviewCount > 0)
         .sort((a, b) => b.reviewCount - a.reviewCount || b.avgRating - a.avgRating),
       excluded,
-      6,
+      FEATURED_PLACE_LIMIT,
     )
     const topRated = pickUnique(
       [...places]
         .filter((place) => place.reviewCount >= 3 || place.avgRating >= 4.5)
         .sort((a, b) => b.avgRating - a.avgRating || b.reviewCount - a.reviewCount),
       excluded,
-      6,
+      FEATURED_PLACE_LIMIT,
     )
     return { nearYou, trending, topRated }
   }, [places])
@@ -366,7 +368,7 @@ export default function HomePage() {
         seen.add(place.id)
         return true
       })
-      .slice(0, 6)
+      .slice(0, FEATURED_PLACE_LIMIT)
   }, [followingFeed])
 
   const applyPriceFilter = <T extends Place>(arr: T[]): T[] =>
@@ -379,9 +381,9 @@ export default function HomePage() {
   }
 
   const fallbackForYou = recommendations.forYou.length > 0
-    ? fillSection(recommendations.forYou, curated.topRated, 6)
+    ? fillSection(recommendations.forYou, curated.topRated, FEATURED_PLACE_LIMIT)
     : curated.topRated
-  const fallbackNearYou = fillSection(curated.nearYou, curated.trending, 6)
+  const fallbackNearYou = fillSection(curated.nearYou, curated.trending, FEATURED_PLACE_LIMIT)
 
   const forYouPlaces = applyPriceFilter(fallbackForYou)
   const trendingPlaces = applyPriceFilter(recommendations.trendingNow.length > 0 ? recommendations.trendingNow : curated.trending)
@@ -594,7 +596,11 @@ export default function HomePage() {
                     Top Foodies{activeCity ? ` in ${activeCity}` : ''}
                   </h2>
                 </div>
-                <Link to="/leaderboard" className="text-xs text-orange-500 hover:text-orange-600 font-semibold">
+                <Link
+                  to="/leaderboard"
+                  state={{ from: { pathname: location.pathname, search: location.search } }}
+                  className="text-xs text-orange-500 hover:text-orange-600 font-semibold"
+                >
                   Full leaderboard →
                 </Link>
               </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { Loader2, Trophy } from 'lucide-react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Loader2, Trophy } from 'lucide-react'
 import { api } from '../lib/api'
 import UserAvatar from '../components/ui/UserAvatar'
 
@@ -16,8 +16,17 @@ type LeaderboardUser = {
 }
 
 const MEDALS = ['🥇', '🥈', '🥉']
+const PODIUM_ORDER = [1, 0, 2]
+const PODIUM_STYLES = [
+  'min-h-[188px] bg-slate-50/90 border-slate-200',
+  'min-h-[228px] bg-[linear-gradient(180deg,#fff7ed_0%,#ffffff_100%)] border-amber-300 shadow-[0_24px_60px_-30px_rgba(249,115,22,0.45)]',
+  'min-h-[172px] bg-slate-50/90 border-slate-200',
+]
+const PODIUM_AVATARS = ['w-11 h-11', 'w-14 h-14', 'w-10 h-10']
 
 export default function LeaderboardPage() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [leaderboard, setLeaderboard] = useState<LeaderboardUser[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -29,9 +38,26 @@ export default function LeaderboardPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  const handleBack = () => {
+    const from = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from
+    if (from?.pathname) {
+      navigate(`${from.pathname}${from.search ?? ''}`)
+      return
+    }
+    navigate(-1)
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
       <div className="mb-8">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-orange-500 transition-colors mb-5"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back
+        </button>
         <div className="flex items-center gap-3 mb-1">
           <Trophy className="w-6 h-6 text-amber-500" />
           <h1 className="text-2xl font-bold text-slate-900">Community Leaderboard</h1>
@@ -51,30 +77,30 @@ export default function LeaderboardPage() {
       ) : (
         <>
           {leaderboard.length >= 3 && (
-            <div className="flex items-end justify-center gap-3 mb-8">
-              {[1, 0, 2].map((idx) => {
+            <div className="mb-8 rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(255,247,237,0.95),_rgba(255,255,255,1)_58%)] px-4 py-7 md:px-6">
+              <div className="flex items-end justify-center gap-3 md:gap-4">
+              {PODIUM_ORDER.map((idx, displayIndex) => {
                 const entry = leaderboard[idx]
                 const rank = idx + 1
-                const heights = ['h-28', 'h-36', 'h-24']
-                const bgColors = ['bg-slate-100', 'bg-amber-50 ring-2 ring-amber-300', 'bg-slate-100']
                 return (
                   <Link
                     key={entry.userId}
                     to={`/users/${entry.userId}`}
-                    className={`flex flex-col items-center justify-end rounded-2xl px-4 pb-4 pt-2 flex-1 max-w-[140px] transition-opacity hover:opacity-80 ${heights[idx]} ${bgColors[idx]}`}
+                    className={`flex flex-1 max-w-[150px] flex-col items-center justify-end rounded-[28px] border px-4 pb-4 pt-3 text-center transition-all duration-200 hover:-translate-y-1 hover:border-amber-300 hover:shadow-[0_24px_60px_-30px_rgba(249,115,22,0.42)] ${PODIUM_STYLES[displayIndex]}`}
                   >
-                    <span className="text-xl mb-1">{MEDALS[rank - 1]}</span>
+                    <span className="mb-2 text-xl">{MEDALS[rank - 1]}</span>
                     <UserAvatar
                       name={entry.displayName}
                       avatarUrl={entry.avatarUrl}
-                      className={idx === 0 ? 'w-12 h-12' : 'w-10 h-10'}
+                      className={PODIUM_AVATARS[displayIndex]}
                       textClassName="text-xs"
                     />
-                    <p className="text-xs font-semibold text-slate-900 mt-1.5 text-center truncate w-full">{entry.displayName}</p>
-                    <p className="text-xs text-slate-500">{entry.points} pts</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 truncate w-full">{entry.displayName}</p>
+                    <p className="mt-1 text-xs text-slate-500">{entry.points} pts</p>
                   </Link>
                 )
               })}
+              </div>
             </div>
           )}
 
