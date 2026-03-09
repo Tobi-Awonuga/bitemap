@@ -44,7 +44,7 @@ type LeaderboardUser = {
   visits: number
   saves: number
   followers: number
-  score: number
+  points: number
 }
 
 function recommendationReasonFor(place: Place | RecommendedPlace): string | undefined {
@@ -60,6 +60,20 @@ function pickUnique(places: Place[], excluded: Set<string>, limit: number): Plac
     selected.push(place)
     if (selected.length >= limit) break
   }
+  return selected
+}
+
+function fillSection<T extends Place>(primary: T[], fallback: T[], limit: number): T[] {
+  const selected: T[] = []
+  const seen = new Set<string>()
+
+  for (const place of [...primary, ...fallback]) {
+    if (seen.has(place.id)) continue
+    seen.add(place.id)
+    selected.push(place)
+    if (selected.length >= limit) break
+  }
+
   return selected
 }
 
@@ -364,11 +378,18 @@ export default function HomePage() {
     return arr
   }
 
-  const forYouPlaces = applyPriceFilter(recommendations.forYou.length > 0 ? recommendations.forYou : curated.topRated)
+  const fallbackForYou = recommendations.forYou.length > 0
+    ? fillSection(recommendations.forYou, curated.topRated, 6)
+    : curated.topRated
+  const fallbackNearYou = fillSection(curated.nearYou, curated.trending, 6)
+
+  const forYouPlaces = applyPriceFilter(fallbackForYou)
   const trendingPlaces = applyPriceFilter(recommendations.trendingNow.length > 0 ? recommendations.trendingNow : curated.trending)
   const friendsLovedPlaces = applyPriceFilter(recommendations.friendsLoved.length > 0 ? recommendations.friendsLoved : followingPicks)
-  const nearYouPlaces = applyPriceFilter(curated.nearYou)
+  const nearYouPlaces = applyPriceFilter(fallbackNearYou)
   const searchResults = debouncedSearch ? sortSearchResults(applyPriceFilter(places)) : []
+  const hasFeaturedResults =
+    nearYouPlaces.length > 0 || forYouPlaces.length > 0 || trendingPlaces.length > 0 || friendsLovedPlaces.length > 0
 
   const locationLabel = useMemo(() => {
     if (coords) return 'Near you'
@@ -507,16 +528,34 @@ export default function HomePage() {
             </section>
           )}
 
-          {/* Price filter notice */}
-          {!debouncedSearch && priceFilter !== null && forYouPlaces.length === 0 && trendingPlaces.length === 0 && nearYouPlaces.length === 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-center justify-between">
-              <p className="text-sm text-amber-800">
-                No places tagged with this price level yet. Admins can set price levels when editing a place.
-              </p>
-              <button onClick={() => setPriceFilter(null)} className="text-xs font-semibold text-amber-700 hover:text-amber-900 shrink-0 ml-4">
-                Clear filter
-              </button>
+          {!debouncedSearch && !hasFeaturedResults && (
+            <div className="bg-white border border-slate-200 rounded-2xl px-6 py-12 text-center">
+              <h2 className="text-lg font-semibold text-slate-900">No places found</h2>
+              <p className="text-sm text-slate-500 mt-2">Try a different cuisine or clear the price filter.</p>
             </div>
+          )}
+
+          {!debouncedSearch && (
+            <section>
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-orange-500" />
+                  <h2 className="text-xl font-bold text-slate-900">Near You</h2>
+                </div>
+                <span className="text-sm text-slate-400">
+                  {refreshing ? 'Refreshing...' : `${places.length} places`}
+                </span>
+              </div>
+              {nearYouPlaces.length === 0 ? (
+                <p className="text-sm text-slate-500 py-6">No places found.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {nearYouPlaces.map((place) => (
+                    <PlaceCard key={place.id} place={place} />
+                  ))}
+                </div>
+              )}
+            </section>
           )}
 
           {!debouncedSearch && forYouPlaces.length > 0 && (
@@ -593,34 +632,13 @@ export default function HomePage() {
                         <div className="text-center">
                           <p className="text-xs font-semibold text-slate-900 truncate max-w-[100px]">{entry.displayName}</p>
                           <p className="text-[11px] text-slate-400 mt-0.5">{topStat}</p>
+                          <p className="text-[11px] font-semibold text-orange-600">{entry.points} pts</p>
                         </div>
-                        <span className="text-xs font-bold text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">
-                          {entry.score} pts
-                        </span>
                       </Link>
                     )
                   })}
                 </div>
               )}
-            </section>
-          )}
-
-          {!debouncedSearch && (
-            <section>
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-orange-500" />
-                  <h2 className="text-xl font-bold text-slate-900">Near You</h2>
-                </div>
-                <span className="text-sm text-slate-400">
-                  {refreshing ? 'Refreshing...' : `${places.length} places`}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                {nearYouPlaces.map((place) => (
-                  <PlaceCard key={place.id} place={place} />
-                ))}
-              </div>
             </section>
           )}
 

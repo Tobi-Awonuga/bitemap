@@ -12,6 +12,7 @@ type LeaderboardUser = {
   visits: number
   saves: number
   followers: number
+  points: number
 }
 
 const MEDALS = ['🥇', '🥈', '🥉']
@@ -35,7 +36,7 @@ export default function LeaderboardPage() {
           <Trophy className="w-6 h-6 text-amber-500" />
           <h1 className="text-2xl font-bold text-slate-900">Community Leaderboard</h1>
         </div>
-        <p className="text-slate-500 text-sm">Ranked by reviews, saves, followers, and visits.</p>
+        <p className="text-slate-500 text-sm">Points come from reviews, saves, followers, and visits.</p>
       </div>
 
       {loading ? (
@@ -70,7 +71,7 @@ export default function LeaderboardPage() {
                       textClassName="text-xs"
                     />
                     <p className="text-xs font-semibold text-slate-900 mt-1.5 text-center truncate w-full">{entry.displayName}</p>
-                    <p className="text-xs text-slate-500">{entry.reviews} reviews</p>
+                    <p className="text-xs text-slate-500">{entry.points} pts</p>
                   </Link>
                 )
               })}
@@ -99,6 +100,9 @@ export default function LeaderboardPage() {
                     {entry.reviews} reviews - {entry.saves} saves - {entry.followers} followers - {entry.visits} visits
                   </p>
                 </div>
+                <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-full shrink-0">
+                  {entry.points} pts
+                </span>
               </Link>
             ))}
           </div>

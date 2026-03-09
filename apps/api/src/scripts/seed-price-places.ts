@@ -68,6 +68,24 @@ const seedPlaces: SeedPlace[] = [
     longitude: -79.3351,
     priceLevel: 3,
   },
+  {
+    name: 'Ossington Taco Club',
+    cuisine: 'Mexican',
+    description: 'Street-style tacos and citrusy cocktails on Ossington.',
+    address: '242 Ossington Ave, Toronto, ON, Canada',
+    latitude: 43.6471,
+    longitude: -79.4224,
+    priceLevel: 2,
+  },
+  {
+    name: 'King West Ramen Lab',
+    cuisine: 'Japanese',
+    description: 'Rich tonkotsu ramen and late-night small plates.',
+    address: '318 King St W, Toronto, ON, Canada',
+    latitude: 43.6462,
+    longitude: -79.3896,
+    priceLevel: 2,
+  },
 ]
 
 async function upsertSeedPlace(seedPlace: SeedPlace): Promise<'inserted' | 'updated' | 'unchanged'> {

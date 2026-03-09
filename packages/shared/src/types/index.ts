@@ -104,6 +104,7 @@ export interface UserLeaderboardEntry {
   visits: number
   saves: number
   followers: number
+  points: number
 }
 
 export interface AdminInsights {

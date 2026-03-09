@@ -7,6 +7,7 @@ import { follows, places, reviews, saves, users, visits } from '../../db/schema'
 import { requireAuth, type AuthRequest } from '../../middleware/auth.middleware'
 import { createNotification } from '../notifications/notifications.service'
 import { profileUpdateSchema } from '@bitemap/shared'
+import { fetchUserLeaderboard } from './leaderboard.service'
 
 export const usersRouter = Router()
 const GOOGLE_PHOTO_PREFIX = 'gphoto:'
@@ -182,82 +183,11 @@ async function getPlaceStats(limit = 300): Promise<PlaceStatsRow[]> {
   }))
 }
 
-type LeaderboardRow = {
-  userId: string
-  displayName: string
-  avatarUrl: string | null
-  reviews: number
-  visits: number
-  saves: number
-  followers: number
-}
-
-async function getUserLeaderboard(limit = 10): Promise<LeaderboardRow[]> {
-  const boundedLimit = Math.min(Math.max(limit, 1), 25)
-  const rows = await db
-    .select({
-      userId: users.id,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      reviews: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('reviews'),
-      visits: sql<number>`(select count(*) from visits v where v.user_id = ${users.id})`.as('visits'),
-      saves: sql<number>`(select count(*) from saves s where s.user_id = ${users.id})`.as('saves'),
-      followers: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('followers'),
-    })
-    .from(users)
-    .where(eq(users.isActive, true))
-    .orderBy(
-      desc(sql`(select count(*) from reviews r where r.user_id = ${users.id})`),
-      desc(sql`(select count(*) from saves s where s.user_id = ${users.id})`),
-      desc(sql`(select count(*) from follows f where f.following_id = ${users.id})`),
-      desc(sql`(select count(*) from visits v where v.user_id = ${users.id})`),
-      desc(users.createdAt),
-    )
-    .limit(boundedLimit)
-
-  return rows.map((row) => ({
-    userId: row.userId,
-    displayName: row.displayName,
-    avatarUrl: row.avatarUrl,
-    reviews: Number(row.reviews),
-    visits: Number(row.visits),
-    saves: Number(row.saves),
-    followers: Number(row.followers),
-  }))
-}
-
 function normalizeCity(raw: string | undefined): string | null {
   if (!raw) return null
   const cleaned = raw.trim()
   if (!cleaned) return null
   return cleaned.slice(0, 80)
-}
-
-function cityFilterSql(city: string | null) {
-  if (!city) return sql`true`
-  return sql`(
-    exists (
-      select 1
-      from reviews r
-      inner join places p on p.id = r.place_id
-      where r.user_id = ${users.id}
-        and lower(p.address) like lower(${`%${city}%`})
-    )
-    or exists (
-      select 1
-      from visits v
-      inner join places p on p.id = v.place_id
-      where v.user_id = ${users.id}
-        and lower(p.address) like lower(${`%${city}%`})
-    )
-    or exists (
-      select 1
-      from saves s
-      inner join places p on p.id = s.place_id
-      where s.user_id = ${users.id}
-        and lower(p.address) like lower(${`%${city}%`})
-    )
-  )`
 }
 
 // GET /api/users/me
@@ -503,40 +433,7 @@ usersRouter.get('/leaderboard', requireAuth, async (req: AuthRequest, res) => {
   const limitRaw = Number.parseInt(String(req.query.limit ?? '10'), 10)
   const limit = Number.isFinite(limitRaw) ? limitRaw : 10
   const city = normalizeCity(typeof req.query.city === 'string' ? req.query.city : undefined)
-  const boundedLimit = Math.min(Math.max(limit, 1), 25)
-  const filter = cityFilterSql(city)
-
-  const rows = await db
-    .select({
-      userId: users.id,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      reviews: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('reviews'),
-      visits: sql<number>`(select count(*) from visits v where v.user_id = ${users.id})`.as('visits'),
-      saves: sql<number>`(select count(*) from saves s where s.user_id = ${users.id})`.as('saves'),
-      followers: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('followers'),
-    })
-    .from(users)
-    .where(and(eq(users.isActive, true), filter))
-    .orderBy(
-      desc(sql`(select count(*) from reviews r where r.user_id = ${users.id})`),
-      desc(sql`(select count(*) from saves s where s.user_id = ${users.id})`),
-      desc(sql`(select count(*) from follows f where f.following_id = ${users.id})`),
-      desc(sql`(select count(*) from visits v where v.user_id = ${users.id})`),
-      desc(users.createdAt),
-    )
-    .limit(boundedLimit)
-
-  const leaderboard = rows.map((row) => ({
-    userId: row.userId,
-    displayName: row.displayName,
-    avatarUrl: row.avatarUrl,
-    reviews: Number(row.reviews),
-    visits: Number(row.visits),
-    saves: Number(row.saves),
-    followers: Number(row.followers),
-  }))
-
+  const leaderboard = await fetchUserLeaderboard(limit, city)
   res.json({ data: leaderboard })
 })
 

@@ -3,6 +3,7 @@ import { eq, count, sql, desc } from 'drizzle-orm'
 import { db } from '../../db'
 import { users, places, reviewReports, reviews, saves, visits } from '../../db/schema'
 import { requireAuth, requireAdmin, AuthRequest } from '../../middleware/auth.middleware'
+import { fetchUserLeaderboard } from '../users/leaderboard.service'
 
 export const adminRouter = Router()
 
@@ -59,39 +60,7 @@ adminRouter.get('/stats', async (_req, res) => {
 adminRouter.get('/leaderboard', async (req, res) => {
   const limitRaw = Number.parseInt(String(req.query.limit ?? '10'), 10)
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 25) : 10
-
-  const rows = await db
-    .select({
-      userId: users.id,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      reviews: sql<number>`(select count(*) from reviews r where r.user_id = ${users.id})`.as('reviews'),
-      visits: sql<number>`(select count(*) from visits v where v.user_id = ${users.id})`.as('visits'),
-      saves: sql<number>`(select count(*) from saves s where s.user_id = ${users.id})`.as('saves'),
-      followers: sql<number>`(select count(*) from follows f where f.following_id = ${users.id})`.as('followers'),
-    })
-    .from(users)
-    .where(eq(users.isActive, true))
-    .orderBy(
-      desc(sql`(select count(*) from reviews r where r.user_id = ${users.id})`),
-      desc(sql`(select count(*) from saves s where s.user_id = ${users.id})`),
-      desc(sql`(select count(*) from follows f where f.following_id = ${users.id})`),
-      desc(sql`(select count(*) from visits v where v.user_id = ${users.id})`),
-      desc(users.createdAt),
-    )
-    .limit(limit)
-
-  res.json(
-    rows.map((row) => ({
-      userId: row.userId,
-      displayName: row.displayName,
-      avatarUrl: row.avatarUrl,
-      reviews: Number(row.reviews),
-      visits: Number(row.visits),
-      saves: Number(row.saves),
-      followers: Number(row.followers),
-    })),
-  )
+  res.json(await fetchUserLeaderboard(limit))
 })
 
 // GET /api/admin/insights — ranked operational insights
