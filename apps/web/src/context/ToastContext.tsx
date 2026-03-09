@@ -65,28 +65,42 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
 
       {/* Toast stack */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 items-center pointer-events-none">
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex w-[min(92vw,26rem)] flex-col gap-3 items-center pointer-events-none">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg text-sm font-medium min-w-[240px] max-w-sm ${
+            className={`toast-surface animate-toast-in pointer-events-auto w-full px-4 py-3 text-sm text-white ${
               toast.type === 'success'
-                ? 'bg-emerald-600 text-white'
+                ? 'toast-success'
                 : toast.type === 'error'
-                ? 'bg-red-600 text-white'
-                : 'bg-slate-800 text-white'
+                ? 'toast-error'
+                : 'toast-info'
             }`}
           >
-            <ToastIcon type={toast.type} />
-            <span className="flex-1">{toast.message}</span>
-            <button
-              type="button"
-              onClick={() => dismiss(toast.id)}
-              className="opacity-70 hover:opacity-100 transition-opacity"
-              aria-label="Dismiss"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+            <div className="relative flex items-center gap-3">
+              <div
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white ${
+                  toast.type === 'success'
+                    ? 'toast-accent-success'
+                    : toast.type === 'error'
+                    ? 'toast-accent-error'
+                    : 'toast-accent-info'
+                }`}
+              >
+                <ToastIcon type={toast.type} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="pr-2 text-[14px] font-medium leading-5 text-white/92">{toast.message}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => dismiss(toast.id)}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-white/55 transition hover:bg-white/8 hover:text-white"
+                aria-label="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         ))}
       </div>

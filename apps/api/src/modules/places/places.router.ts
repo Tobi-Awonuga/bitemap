@@ -219,6 +219,78 @@ function serializePlaceRow(row: PlaceListRow): PlaceListRow {
   }
 }
 
+function extractCityRegionFromAddress(address: string | null | undefined): string | null {
+  if (!address) return null
+  const parts = address
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  if (parts.length === 0) return null
+
+  const countryTokens = new Set(['canada', 'united states', 'usa'])
+  const provinceOrPostal = /^[A-Z]{2}(?:\s+[A-Z]\d[A-Z]\s?\d[A-Z]\d)?$/i
+  let city: string | null = null
+
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    const part = parts[i]
+    const lower = part.toLowerCase()
+    if (countryTokens.has(lower)) continue
+    if (provinceOrPostal.test(part)) continue
+    if (/\d/.test(part)) continue
+    if (part.length < 2) continue
+    city = part
+    break
+  }
+
+  if (!city) return null
+  const regionMatch = address.match(/\b([A-Z]{2})\b/)
+  return regionMatch ? `${city}, ${regionMatch[1]}` : city
+}
+
+async function reverseGeocodeLabel(lat: number, lng: number): Promise<string | null> {
+  if (GOOGLE_MAPS_API_KEY) {
+    try {
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&result_type=locality|administrative_area_level_1&key=${GOOGLE_MAPS_API_KEY}`,
+      )
+      if (response.ok) {
+        const payload = (await response.json()) as {
+          results?: Array<{
+            address_components?: Array<{ long_name?: string; short_name?: string; types?: string[] }>
+          }>
+        }
+        const components = payload.results?.[0]?.address_components ?? []
+        const city =
+          components.find((component) => component.types?.includes('locality'))?.long_name ??
+          components.find((component) => component.types?.includes('administrative_area_level_2'))?.long_name
+        const region = components.find((component) => component.types?.includes('administrative_area_level_1'))?.short_name
+        if (city && region) return `${city}, ${region}`
+        if (city) return city
+      }
+    } catch {
+      // Fall through to nearest-place inference.
+    }
+  }
+
+  const nearestPlace = await db.query.places.findMany({
+    columns: { address: true, latitude: true, longitude: true },
+    limit: 100,
+  })
+
+  let bestAddress: string | null = null
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const place of nearestPlace) {
+    const distance = haversine(lat, lng, place.latitude, place.longitude)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestAddress = place.address
+    }
+  }
+
+  return extractCityRegionFromAddress(bestAddress)
+}
+
 async function getLocalPlaces(parsed: ListQuery): Promise<PlaceListRow[]> {
   const rows = await db
     .select({
@@ -470,6 +542,19 @@ placesRouter.get('/nearby', requireAuth, async (req: AuthRequest, res) => {
     data: rows,
   })
   res.json(rows)
+})
+
+// GET /api/places/reverse-geocode?lat=..&lng=..
+placesRouter.get('/reverse-geocode', requireAuth, async (req: AuthRequest, res) => {
+  const lat = Number.parseFloat(String(req.query.lat ?? ''))
+  const lng = Number.parseFloat(String(req.query.lng ?? ''))
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    res.status(400).json({ error: 'lat and lng are required' })
+    return
+  }
+
+  const label = await reverseGeocodeLabel(lat, lng)
+  res.json({ data: { cityLabel: label } })
 })
 
 // GET /api/places/:id/photos - best-effort place photo gallery list

@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const { showToast } = useToast()
   const [displayName, setDisplayName] = useState('')
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [avatarRemoved, setAvatarRemoved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -28,6 +29,7 @@ export default function SettingsPage() {
     if (!user) return
     setDisplayName(user.displayName)
     setAvatarUrl(user.avatarUrl ?? '')
+    setAvatarRemoved(false)
   }, [user])
 
   const handleSubmit = async (e: FormEvent) => {
@@ -46,7 +48,7 @@ export default function SettingsPage() {
     try {
       await updateProfile({
         displayName: displayName.trim(),
-        avatarUrl: avatarUrl.trim() || null,
+        avatarUrl: avatarRemoved ? null : avatarUrl.trim() || null,
       })
       showToast('Profile updated', 'success')
       setTimeout(() => navigate('/profile'), 500)
@@ -77,6 +79,7 @@ export default function SettingsPage() {
         return
       }
       setAvatarUrl(value)
+      setAvatarRemoved(false)
       setError(null)
     }
     reader.onerror = () => {
@@ -141,7 +144,7 @@ export default function SettingsPage() {
           <div className="flex items-center gap-4">
             <UserAvatar
               name={displayName || user.displayName}
-              avatarUrl={normalizedAvatarUrl || user.avatarUrl}
+              avatarUrl={avatarRemoved ? null : normalizedAvatarUrl || user.avatarUrl}
               className="w-16 h-16 rounded-2xl"
               textClassName="text-xl"
             />
@@ -154,7 +157,11 @@ export default function SettingsPage() {
               {(normalizedAvatarUrl || user.avatarUrl) && (
                 <button
                   type="button"
-                  onClick={() => setAvatarUrl('')}
+                  onClick={() => {
+                    setAvatarUrl('')
+                    setAvatarRemoved(true)
+                    setError(null)
+                  }}
                   className="inline-flex items-center gap-1.5 text-sm text-red-500 hover:text-red-600"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -177,17 +184,6 @@ export default function SettingsPage() {
           <p className="text-xs text-slate-500">
             Use Upload photo to set your avatar. Images are currently stored directly with your profile.
           </p>
-
-          {normalizedAvatarUrl && avatarUrlValid && (
-            <div className="flex items-center gap-3">
-              <img
-                src={normalizedAvatarUrl}
-                alt="Avatar preview"
-                className="w-12 h-12 rounded-xl object-cover bg-slate-100"
-              />
-              <span className="text-xs text-slate-500">Avatar preview</span>
-            </div>
-          )}
 
           {error && <p className="text-sm text-red-500">{error}</p>}
 

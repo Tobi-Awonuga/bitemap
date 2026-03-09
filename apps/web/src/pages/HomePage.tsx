@@ -100,6 +100,22 @@ function extractCityFromAddress(address: string | undefined): string | null {
   return null
 }
 
+function extractCityRegionFromAddress(address: string | undefined): string | null {
+  if (!address) return null
+  const parts = address
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  if (parts.length < 2) return extractCityFromAddress(address)
+
+  const city = extractCityFromAddress(address)
+  if (!city) return null
+
+  const regionMatch = parts.join(', ').match(/\b([A-Z]{2})\b/)
+  return regionMatch ? `${city}, ${regionMatch[1]}` : city
+}
+
 export default function HomePage() {
   const { user } = useAuth()
   const location = useLocation()
@@ -305,6 +321,17 @@ export default function HomePage() {
       .find((city): city is string => !!city) ?? null
   }, [places, recommendations])
 
+  const activeCityRegion = useMemo(() => {
+    const fromRecommendations = [recommendations.forYou, recommendations.trendingNow, recommendations.friendsLoved]
+      .flat()
+      .map((place) => extractCityRegionFromAddress(place.address))
+      .find((city): city is string => !!city)
+    if (fromRecommendations) return fromRecommendations
+    return places
+      .map((place) => extractCityRegionFromAddress(place.address))
+      .find((city): city is string => !!city) ?? null
+  }, [places, recommendations])
+
   useEffect(() => {
     setLeaderboardLoading(true)
     const params = new URLSearchParams({ limit: '5' })
@@ -394,11 +421,12 @@ export default function HomePage() {
     nearYouPlaces.length > 0 || forYouPlaces.length > 0 || trendingPlaces.length > 0 || friendsLovedPlaces.length > 0
 
   const locationLabel = useMemo(() => {
-    if (coords) return 'Near you'
+    if (coords && activeCityRegion) return activeCityRegion
+    if (coords && activeCity) return activeCity
     if (permission === 'granted') return 'Locating...'
     if (permission === 'denied') return 'Location off'
     return 'Enable location for nearby spots'
-  }, [coords, permission])
+  }, [activeCity, activeCityRegion, coords, permission])
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
@@ -408,7 +436,7 @@ export default function HomePage() {
         <div className="relative max-w-xl">
           <div className="flex items-center gap-2 text-orange-400 text-sm font-medium mb-4">
             <MapPin className="w-4 h-4" />
-            <span>{locationLabel}</span>
+            <span className="animate-city-chip-rise origin-bottom">{locationLabel}</span>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold text-white leading-tight mb-6">
             What are you<br />
