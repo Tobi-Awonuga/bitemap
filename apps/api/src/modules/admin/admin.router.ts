@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { eq, count, sql, desc, ilike, or } from 'drizzle-orm'
+import { eq, count, sql, desc, ilike, or, and } from 'drizzle-orm'
 import { db } from '../../db'
 import { users, places, reviewReports, reviews, saves, visits } from '../../db/schema'
 import { requireAuth, requireAdmin, AuthRequest } from '../../middleware/auth.middleware'
@@ -113,36 +113,65 @@ adminRouter.get('/insights', async (_req, res) => {
 })
 
 // GET /api/admin/users — all users
-adminRouter.get('/users', async (_req, res) => {
-  const allUsers = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      displayName: users.displayName,
-      avatarUrl: users.avatarUrl,
-      role: users.role,
-      isActive: users.isActive,
-      deactivatedAt: users.deactivatedAt,
-      createdAt: users.createdAt,
-      saveCount: sql<number>`COUNT(DISTINCT ${saves.id})`.as('save_count'),
-      visitCount: sql<number>`COUNT(DISTINCT ${visits.id})`.as('visit_count'),
-      reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
-    })
-    .from(users)
-    .leftJoin(saves, eq(saves.userId, users.id))
-    .leftJoin(visits, eq(visits.userId, users.id))
-    .leftJoin(reviews, eq(reviews.userId, users.id))
-    .groupBy(users.id)
-    .orderBy(desc(users.createdAt))
+adminRouter.get('/users', async (req, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '25'), 10)
+  const offsetRaw = Number.parseInt(String(req.query.offset ?? '0'), 10)
+  const query = String(req.query.q ?? '').trim()
+  const roleRaw = String(req.query.role ?? 'all')
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 25
+  const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0
+  const roleFilter = roleRaw === 'admin' || roleRaw === 'user' ? roleRaw : 'all'
+  const whereClause = and(
+    roleFilter === 'all' ? undefined : eq(users.role, roleFilter),
+    query
+      ? or(
+          ilike(users.displayName, `%${query}%`),
+          ilike(users.email, `%${query}%`),
+        )
+      : undefined,
+  )
 
-  res.json(
-    allUsers.map((user) => ({
+  const [allUsers, [{ total }]] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        role: users.role,
+        isActive: users.isActive,
+        deactivatedAt: users.deactivatedAt,
+        createdAt: users.createdAt,
+        saveCount: sql<number>`COUNT(DISTINCT ${saves.id})`.as('save_count'),
+        visitCount: sql<number>`COUNT(DISTINCT ${visits.id})`.as('visit_count'),
+        reviewCount: sql<number>`COUNT(DISTINCT ${reviews.id})`.as('review_count'),
+      })
+      .from(users)
+      .where(whereClause)
+      .leftJoin(saves, eq(saves.userId, users.id))
+      .leftJoin(visits, eq(visits.userId, users.id))
+      .leftJoin(reviews, eq(reviews.userId, users.id))
+      .groupBy(users.id)
+      .orderBy(desc(users.createdAt))
+      .limit(limit)
+      .offset(offset),
+    db.select({ total: count() }).from(users).where(whereClause),
+  ])
+
+  res.json({
+    data: allUsers.map((user) => ({
       ...user,
       saveCount: Number(user.saveCount),
       visitCount: Number(user.visitCount),
       reviewCount: Number(user.reviewCount),
     })),
-  )
+    pagination: {
+      total: Number(total),
+      limit,
+      offset,
+      hasMore: offset + limit < Number(total),
+    },
+  })
 })
 
 // PATCH /api/admin/users/:id — update user role
@@ -290,14 +319,24 @@ adminRouter.delete('/places/:id', async (req: AuthRequest, res) => {
 })
 
 // GET /api/admin/reviews — all reviews
-adminRouter.get('/reviews', async (_req, res) => {
-  const allReviews = await db.query.reviews.findMany({
-    with: { user: true, place: true },
-    orderBy: (r, { desc }) => [desc(r.createdAt)],
-  })
+adminRouter.get('/reviews', async (req, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '25'), 10)
+  const offsetRaw = Number.parseInt(String(req.query.offset ?? '0'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 25
+  const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0
 
-  res.json(
-    allReviews.map((r) => ({
+  const [allReviews, [{ total }]] = await Promise.all([
+    db.query.reviews.findMany({
+      with: { user: true, place: true },
+      orderBy: (r, { desc: descOrder }) => [descOrder(r.createdAt)],
+      limit,
+      offset,
+    }),
+    db.select({ total: count() }).from(reviews),
+  ])
+
+  res.json({
+    data: allReviews.map((r) => ({
       id: r.id,
       rating: r.rating,
       body: r.body,
@@ -305,7 +344,13 @@ adminRouter.get('/reviews', async (_req, res) => {
       user: { id: r.user.id, displayName: r.user.displayName, email: r.user.email },
       place: { id: r.place.id, name: r.place.name, address: r.place.address },
     })),
-  )
+    pagination: {
+      total: Number(total),
+      limit,
+      offset,
+      hasMore: offset + limit < Number(total),
+    },
+  })
 })
 
 // DELETE /api/admin/reviews/:id
@@ -325,27 +370,36 @@ adminRouter.delete('/reviews/:id', async (req: AuthRequest, res) => {
 adminRouter.get('/review-reports', async (req, res) => {
   const statusRaw = String(req.query.status ?? 'open')
   const status = statusRaw === 'resolved' || statusRaw === 'dismissed' ? statusRaw : 'open'
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '25'), 10)
+  const offsetRaw = Number.parseInt(String(req.query.offset ?? '0'), 10)
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 25
+  const offset = Number.isFinite(offsetRaw) ? Math.max(offsetRaw, 0) : 0
 
-  const reports = await db.query.reviewReports.findMany({
-    where: eq(reviewReports.status, status),
-    with: {
-      reporter: { columns: { id: true, displayName: true, email: true } },
-      resolver: { columns: { id: true, displayName: true, email: true } },
-      review: {
-        columns: { id: true, rating: true, body: true, createdAt: true },
-        with: {
-          user: { columns: { id: true, displayName: true, email: true } },
-          place: { columns: { id: true, name: true, address: true } },
+  const [reports, [{ total }]] = await Promise.all([
+    db.query.reviewReports.findMany({
+      where: eq(reviewReports.status, status),
+      with: {
+        reporter: { columns: { id: true, displayName: true, email: true } },
+        resolver: { columns: { id: true, displayName: true, email: true } },
+        review: {
+          columns: { id: true, rating: true, body: true, createdAt: true },
+          with: {
+            user: { columns: { id: true, displayName: true, email: true } },
+            place: { columns: { id: true, name: true, address: true } },
+          },
         },
       },
-    },
-    orderBy: (table, { desc: descOrder, asc }) => [
-      status === 'open' ? asc(table.createdAt) : descOrder(table.createdAt),
-    ],
-  })
+      orderBy: (table, { desc: descOrder, asc }) => [
+        status === 'open' ? asc(table.createdAt) : descOrder(table.createdAt),
+      ],
+      limit,
+      offset,
+    }),
+    db.select({ total: count() }).from(reviewReports).where(eq(reviewReports.status, status)),
+  ])
 
-  res.json(
-    reports.map((report) => ({
+  res.json({
+    data: reports.map((report) => ({
       id: report.id,
       reason: report.reason,
       details: report.details,
@@ -369,7 +423,13 @@ adminRouter.get('/review-reports', async (req, res) => {
         place: report.review.place,
       },
     })),
-  )
+    pagination: {
+      total: Number(total),
+      limit,
+      offset,
+      hasMore: offset + limit < Number(total),
+    },
+  })
 })
 
 // PATCH /api/admin/review-reports/:id — resolve or dismiss a report
